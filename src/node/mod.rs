@@ -1,30 +1,55 @@
-
-use std::fs;
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
-use std::fmt;
+use std::{fmt, fs};
 // Make sure to read from an LF file!
 const INIT_NODE_FILE: &str = "./nodes.txt";
 
-#[derive(Debug)]
+#[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Node {
-    name: String,
-    ip: Ipv4Addr,
+    pub name: String,
+    pub ip: Ipv4Addr,
+    pub port: i32,
 }
 
 impl Node {
-    fn new(name_str: &str, ip_str: &str) -> Node {
-        let name_string = String::from(name_str);
+    fn new(name_str: &str, ip_str: &str, port: i32) -> Node {
         let ip_parsed = str_to_u8_vector(ip_str);
         Node {
-            name: name_string,
+            name: String::from(name_str),
             ip: Ipv4Addr::new(ip_parsed[0], ip_parsed[1], ip_parsed[2], ip_parsed[3]),
+            port,
         }
+    }
+
+    pub fn nodes_to_string(nodes: &HashSet<Node>) -> String {
+        let mut nodes_string = String::from("");
+        for node in nodes {
+            let a = node.to_string();
+            nodes_string.push_str(&a);
+            // For distinction in deserializing
+            nodes_string.push('\n');
+        }
+        nodes_string
+    }
+    pub fn multiple_from_string(data: String) -> HashSet<Node> {
+        let mut nodes: HashSet<Node> = HashSet::new();
+        let split_by_line = data.split("\n");
+        for line in split_by_line {
+            let node_str: Vec<&str> = line.split(" ").collect();
+            let node = Node::new(
+                node_str[0],
+                node_str[1],
+                node_str[2].parse::<i32>().unwrap(),
+            );
+            nodes.insert(node);
+        }
+        nodes
     }
 }
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.name, self.ip)
+        write!(f, "{} {} {}", self.name, self.ip, self.port)
     }
 }
 
@@ -39,14 +64,7 @@ fn str_to_u8_vector(ip_str: &str) -> Vec<u8> {
     ip_parsed
 }
 
-pub fn read_starting_nodes() -> Vec<Node> {
-    let mut nodes: Vec<Node> = Vec::new();
+pub fn read_starting_nodes() -> HashSet<Node> {
     let data = fs::read_to_string(INIT_NODE_FILE).expect("Something's wrong with the file.");
-    let split_by_line = data.split("\n");
-    for line in split_by_line {
-        let node_str: Vec<&str> = line.split(" ").collect();
-        let node = Node::new(node_str[0], node_str[1]);
-        nodes.push(node);
-    }
-    nodes
+    return Node::multiple_from_string(data);
 }

@@ -1,10 +1,16 @@
 mod node;
 mod udp;
+use futures::executor::block_on;
+use std::sync::Mutex;
+
+async fn async_main() {
+    let mut _nodes = node::read_starting_nodes();
+    let mutex = Mutex::new(&mut _nodes);
+    udp::udp_discovery_server(mutex).await;
+}
 
 fn main() -> std::io::Result<()> {
-    let _nodes = node::read_starting_nodes();
-    let a = _nodes[0].to_string();
-    println!("{}", a);
+    block_on(async_main());
     Ok(())
 }
 
