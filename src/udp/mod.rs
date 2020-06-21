@@ -2,7 +2,6 @@ use crate::node;
 use std::collections::HashSet;
 use std::net::UdpSocket;
 use std::sync::Mutex;
-// use std::thread;
 use std::convert::TryInto;
 use std::time::{Duration, Instant};
 mod get;
@@ -46,7 +45,6 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
         socket.send_to(node_bytes, target_addr).ok();
         let mut buf = [0; BUF_SIZE];
         let rcv_result = socket.recv_from(&mut buf);
-        let buf = trim_buffer(&buf);
         let received_nodes_str = match rcv_result {
             Ok((amt, _)) => std::str::from_utf8(&buf[..amt]).unwrap().to_string(),
             Err(_) => continue,
@@ -65,7 +63,7 @@ async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
     let nodes = &*nodes_ptr;
     let request = get::GETRequest::random_get();
     let mut min_duration = Duration::new(3, 0);
-    let mut udp_triplet: (String, get::GETResponse);
+    let mut tcp_pair: (String, get::GETResponse);
     for node in &**nodes {
         let target_addr = generate_address(&node.ip.to_string(), node.port);
         let start_time = Instant::now();
@@ -84,7 +82,7 @@ async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
         let res = get::GETResponse::new(tcp_port);
         let duration = start_time.elapsed();
         if min_duration > duration {
-            udp_triplet = (src.ip().to_string(), res);
+            tcp_pair = (src.ip().to_string(), res);
             min_duration = duration;
         }
     }
@@ -95,14 +93,12 @@ pub async fn udp_server(mutex: Mutex<&mut HashSet<node::Node>>) {
     println!("generated socket successfully!");
     let mut start_time = Instant::now();
     loop {
-        {
-            let duration = start_time.elapsed();
-            if duration.as_millis() > REFRESH_INTERVAL_MS {
-                udp_discovery_server(&socket, &mutex);
-                start_time = Instant::now();
-                continue;
-            }
-            udp_get_server(&socket, &mutex).await;
+        let duration = start_time.elapsed();
+        if duration.as_millis() > REFRESH_INTERVAL_MS {
+            udp_discovery_server(&socket, &mutex);
+            start_time = Instant::now();
+            continue;
         }
+        udp_get_server(&socket, &mutex).await;
     }
 }
