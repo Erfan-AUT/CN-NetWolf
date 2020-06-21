@@ -1,34 +1,15 @@
-use std::{fs, io};
-use std::fs::{self, DirEntry};
-use std::path::Path;
 
-// one possible implementation of walking a directory only visiting files
-fn visit_dirs(dir: &Path, cb: &dyn Fn(&DirEntry)) -> io::Result<()> {
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                visit_dirs(&path, cb)?;
-            } else {
-                cb(&entry);
-            }
-        }
+use std::fs;
+pub fn file_list() -> Vec<String> {
+    let paths = fs::read_dir("./static").unwrap();
+    let mut result = vec![];
+    for path in paths {
+        let path_str = path.unwrap().path().display().to_string();
+        result.push(path_str);
     }
-    Ok(())
+    result
 }
 
-fn mamad() -> io::Result<()> {
-    let mut entries = fs::read_dir(".")?
-        .map(|res| res.map(|e| e.path()))
-        .collect::<Result<Vec<_>, io::Error>>()?;
-
-    // The order in which `read_dir` returns entries is not guaranteed. If reproducible
-    // ordering is required the entries should be explicitly sorted.
-
-    entries.sort();
-
-    // The entries have now been sorted by their path.
-
-    Ok(())
-}
+// println!("Name: {}", path_str);
+// let data = fs::read_to_string(path_str).expect("Something's wrong with the file.");
+// println!("{}", data);
