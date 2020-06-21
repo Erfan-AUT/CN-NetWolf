@@ -29,6 +29,7 @@ impl Node {
             // For distinction in deserializing
             nodes_string.push('\n');
         }
+        nodes_string.truncate(nodes_string.trim_end().len());
         nodes_string
     }
     pub fn multiple_from_string(data: String) -> HashSet<Node> {
