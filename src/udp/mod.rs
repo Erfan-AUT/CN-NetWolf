@@ -1,10 +1,10 @@
 use crate::node;
 use std::collections::HashSet;
-use std::net::{UdpSocket, SocketAddr};
+use std::net::UdpSocket;
 use std::sync::Mutex;
 // use std::thread;
-use rand::Rng;
-use std::time::{Instant, Duration};
+use std::convert::TryInto;
+use std::time::{Duration, Instant};
 mod get;
 
 const UDP_SERVER_PORT: i32 = 3222;
@@ -31,17 +31,6 @@ pub fn generate_address(ip: &str, port: i32) -> String {
     addr
 }
 
-fn trim_buffer(buf: &[u8]) -> &[u8] {
-    let mut first_index: usize = 0;
-    for i in 0..buf.len() {
-        if buf[i] as char == '\0' {
-            first_index = i;
-            break;
-        }
-    }
-    &buf[0..first_index]
-}
-
 fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
     let local_address = socket.local_addr().unwrap().to_string();
     let mut nodes_ptr = mutex.lock().unwrap();
@@ -59,10 +48,7 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
         let rcv_result = socket.recv_from(&mut buf);
         let buf = trim_buffer(&buf);
         let received_nodes_str = match rcv_result {
-            Ok(_) => match std::str::from_utf8(&buf) {
-                Ok(node_strs) => node_strs.to_string(),
-                Err(_) => continue,
-            },
+            Ok((amt, _)) => std::str::from_utf8(&buf[..amt]).unwrap().to_string(),
             Err(_) => continue,
         };
         println!("{}", received_nodes_str);
@@ -74,21 +60,12 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
     nodes_ptr.extend(received_nodes);
 }
 
-fn generate_get() -> get::GETRequest {
-    let request_options = ["mamad.txt", "reza.mp4", "ahmad.png"];
-    let mut rng = rand::thread_rng();
-    let option_index = rng.gen_range(0, request_options.len());
-    let random_option = request_options[option_index];
-    let request = get::GETRequest::new(random_option);
-    request
-}
-
-fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
+async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
     let nodes_ptr = mutex.lock().unwrap();
     let nodes = &*nodes_ptr;
-    let request = generate_get();
+    let request = get::GETRequest::random_get();
     let mut min_duration = Duration::new(3, 0);
-    let mut udp_pair: (usize, SocketAddr, get::GETResponse);
+    let mut udp_triplet: (String, get::GETResponse);
     for node in &**nodes {
         let target_addr = generate_address(&node.ip.to_string(), node.port);
         let start_time = Instant::now();
@@ -98,14 +75,18 @@ fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
         let mut buf = [0; BUF_SIZE];
         let (amt, src) = match socket.recv_from(&mut buf) {
             Ok((amt, src)) => (amt, src),
-            Err(_) => continue
+            Err(_) => continue,
         };
+        let tcp_port = i32::from_be_bytes(match buf[..amt].try_into() {
+            Ok(arr) => arr,
+            Err(_) => continue,
+        });
+        let res = get::GETResponse::new(tcp_port);
         let duration = start_time.elapsed();
         if min_duration > duration {
-            udp_pair = (amt, src, get::GETResponse::new(1));
+            udp_triplet = (src.ip().to_string(), res);
             min_duration = duration;
         }
-        let buf = trim_buffer(&buf);
     }
 }
 
@@ -121,6 +102,7 @@ pub async fn udp_server(mutex: Mutex<&mut HashSet<node::Node>>) {
                 start_time = Instant::now();
                 continue;
             }
+            udp_get_server(&socket, &mutex).await;
         }
     }
 }

@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::fmt;
 
 pub struct GETRequest {
@@ -14,6 +15,13 @@ impl GETRequest {
     pub fn new(file_name: &str) -> GETRequest {
         let file_name = file_name.to_string();
         GETRequest { file_name }
+    }
+    pub fn random_get() -> GETRequest {
+        let request_options = ["mamad.txt", "reza.mp4", "ahmad.png"];
+        let mut rng = rand::thread_rng();
+        let option_index = rng.gen_range(0, request_options.len());
+        let random_option = request_options[option_index];
+        GETRequest::new(random_option)
     }
 }
 
