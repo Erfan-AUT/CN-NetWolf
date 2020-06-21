@@ -1,8 +1,9 @@
 use crate::node;
+use rand::Rng;
 use std::collections::HashSet;
-use std::net::UdpSocket;
+use std::io::{Error, ErrorKind};
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Mutex;
-use std::convert::TryInto;
 use std::time::{Duration, Instant};
 mod get;
 
@@ -30,6 +31,31 @@ pub fn generate_address(ip: &str, port: i32) -> String {
     addr
 }
 
+fn send_bytes_to_socket(
+    data: &[u8],
+    node: &node::Node,
+    socket: &UdpSocket,
+) -> Result<usize, Error> {
+    let target_addr = generate_address(&node.ip.to_string(), node.port);
+    // Don't really care if it fails.
+    socket.send_to(data, target_addr)
+}
+
+fn receive_string_from_socket(socket: &UdpSocket) -> Result<(String, SocketAddr), Error> {
+    let mut buf = [0; BUF_SIZE];
+    //This is hyst a ridiculous trick to get over all of rust's size-checking.
+    let err = Error::new(ErrorKind::Other, "OH NONONO");
+    let (amt, src) = match socket.recv_from(&mut buf) {
+        Ok((amt, src)) => (amt, src),
+        Err(e) => return Err(e),
+    };
+    //This is where the data is fully received
+    match std::str::from_utf8(&buf[..amt]) {
+        Ok(string) => Ok((string.to_string(), src)),
+        Err(_) => Err(err),
+    }
+}
+
 fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
     let local_address = socket.local_addr().unwrap().to_string();
     let mut nodes_ptr = mutex.lock().unwrap();
@@ -39,14 +65,12 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
     // De-reference and referencing so that it could be iterated over.
     // I swear I'm just playing around with pointers until it gives up. :)))))
     for node in &**nodes {
-        let node_bytes = node_strings.as_bytes();
-        let target_addr = generate_address(&node.ip.to_string(), node.port);
-        // Don't really care if it fails.
-        socket.send_to(node_bytes, target_addr).ok();
-        let mut buf = [0; BUF_SIZE];
-        let rcv_result = socket.recv_from(&mut buf);
-        let received_nodes_str = match rcv_result {
-            Ok((amt, _)) => std::str::from_utf8(&buf[..amt]).unwrap().to_string(),
+        let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, socket) {
+            Ok(__) => __,
+            Err(_) => continue,
+        };
+        let (received_nodes_str, _) = match receive_string_from_socket(socket) {
+            Ok((string, __)) => (string, __),
             Err(_) => continue,
         };
         println!("{}", received_nodes_str);
@@ -59,32 +83,68 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
 }
 
 async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
+    let mut rng = rand::thread_rng();
+    let is_request = rng.gen::<bool>();
+    if is_request {
+        udp_get_requester(socket, mutex).await;
+    } else {
+        // Don't respond if you don't have the file!
+        udp_get_responder(socket).await;
+    }
+}
+
+async fn udp_get_responder(socket: &UdpSocket) {
+    let (result_string, src) = match receive_string_from_socket(socket) {
+        Ok((string, src)) => (string, src),
+        Err(_) => return,
+    };
+    let request = match get::GETPair::from_str(&result_string) {
+        Ok(req) => req,
+        Err(_) => return,
+    };
+    let target = node::Node::new("", &src.to_string(), request.tcp_port);
+    let response = get::GETPair::with_random_port(&request.file_name);
+    // Sending ACK
+    let _ = match send_bytes_to_socket(response.to_string().as_bytes(), &target, socket) {
+        Ok(__) => __,
+        Err(_) => return,
+    };
+}
+
+async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
     let nodes_ptr = mutex.lock().unwrap();
     let nodes = &*nodes_ptr;
-    let request = get::GETRequest::random_get();
     let mut min_duration = Duration::new(3, 0);
-    let mut tcp_pair: (String, get::GETResponse);
+    let mut tcp_pair: (String, get::GETPair);
+    let request = get::GETPair::random_get();
     for node in &**nodes {
-        let target_addr = generate_address(&node.ip.to_string(), node.port);
         let start_time = Instant::now();
-        socket
-            .send_to(request.to_string().as_bytes(), target_addr)
-            .ok();
-        let mut buf = [0; BUF_SIZE];
-        let (amt, src) = match socket.recv_from(&mut buf) {
-            Ok((amt, src)) => (amt, src),
-            Err(_) => continue,
-        };
-        let tcp_port = i32::from_be_bytes(match buf[..amt].try_into() {
-            Ok(arr) => arr,
-            Err(_) => continue,
-        });
-        let res = get::GETResponse::new(tcp_port);
-        let duration = start_time.elapsed();
-        if min_duration > duration {
-            tcp_pair = (src.ip().to_string(), res);
-            min_duration = duration;
+        // Requesting a file from another node
+        if request.file_name != "null" {
+            let _ = match send_bytes_to_socket(request.to_string().as_bytes(), node, socket) {
+                Ok(__) => __,
+                Err(_) => continue,
+            };
+            let (get_pair_string, src) = match receive_string_from_socket(socket) {
+                Ok((string, src)) => (string, src),
+                Err(_) => continue,
+            };
+            let duration = start_time.elapsed();
+            let response = match get::GETPair::from_str(&get_pair_string) {
+                Ok(res) => res,
+                Err(_) => continue,
+            };
+            // Extra checking! :))
+            if min_duration > duration && request.file_name == response.file_name {
+                tcp_pair = (src.ip().to_string(), response);
+                min_duration = duration;
+            }
         }
+    }
+    // Checking that there was an ACK.
+    if Duration::new(3, 0) > min_duration {
+        // Spawn TCP
+        println!("ooh yeaah");
     }
 }
 

@@ -12,7 +12,7 @@ pub struct Node {
 }
 
 impl Node {
-    fn new(name_str: &str, ip_str: &str, port: i32) -> Node {
+    pub fn new(name_str: &str, ip_str: &str, port: i32) -> Node {
         let ip_parsed = str_to_u8_vector(ip_str);
         Node {
             name: String::from(name_str),
@@ -36,11 +36,11 @@ impl Node {
         let mut nodes: HashSet<Node> = HashSet::new();
         let split_by_line = data.split("\n");
         for line in split_by_line {
-            let node_str: Vec<&str> = line.split(" ").collect();
+            let node_strs: Vec<&str> = line.split(" ").collect();
             let node = Node::new(
-                node_str[0],
-                node_str[1],
-                node_str[2].parse::<i32>().unwrap(),
+                node_strs[0],
+                node_strs[1],
+                node_strs[2].parse::<i32>().unwrap(),
             );
             nodes.insert(node);
         }
