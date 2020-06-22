@@ -1,5 +1,4 @@
-use crate::dir;
-use crate::node;
+use crate::{dir, tcp, node, BUF_SIZE};
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
@@ -8,8 +7,6 @@ use std::sync::{Mutex, mpsc, mpsc::Receiver};
 use std::time::{Duration, Instant};
 use std::{thread, time};
 pub mod get;
-use crate::tcp;
-use crate::BUF_SIZE;
 
 const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
@@ -78,7 +75,7 @@ fn discovery_or_get(input_string: &str) -> PacketType {
     PacketType::Node
 }
 
-pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&UdpSocket>, nodes_mutex: Mutex<&mut HashSet<node::Node>>) {
+pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&UdpSocket>, nodes_mutex: &Mutex<&mut HashSet<node::Node>>) {
     let local_address: String;
     let discovery_interval = time::Duration::from_millis(DISCOVERY_INTERVAL_MS);
     {
@@ -120,13 +117,13 @@ pub async fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_mutex: 
 
 }
 
-pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>) {
+pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>, stdin_rx: Receiver<String>) {
     let socket = generate_socket();
     let socket_mutex = Mutex::new(&socket);
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
-    discovery_server(discovery_rx, &socket_mutex, nodes_mutex);
+    discovery_server(discovery_rx, &socket_mutex, &nodes_mutex);
     get_server(get_rx, &socket_mutex);
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
@@ -148,8 +145,17 @@ pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>) {
                 Err(_) => (),
             }
         }
-        // if discovery_or_get()
-
+        loop {
+            let input = match stdin_rx.try_recv() {
+                Ok(data) => data,
+                Err(_) => break
+            };
+            if input.starts_with("list") {
+                println!("{:?}", *nodes_mutex.lock().unwrap());
+            }
+            else if input.starts_with("get") {
+                
+            }
+        }
     }
-    
 }

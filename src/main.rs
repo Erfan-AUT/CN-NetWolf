@@ -7,8 +7,8 @@ mod udp;
 use clap::{App, Arg};
 use futures::executor::block_on;
 use rand::Rng;
-use std::env;
-use std::sync::Mutex;
+use std::{env, io};
+use std::sync::{Mutex, mpsc};
 
 // pub const STATIC_DIR: &'static str = "./static/";
 pub const BUF_SIZE: usize = 8192;
@@ -46,8 +46,19 @@ async fn async_main() {
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
     *STATIC_DIR.lock().unwrap() = static_dir;
     let mut _nodes = node::read_starting_nodes(init_nodes_dir);
+    let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
     let mutex = Mutex::new(&mut _nodes);
-    udp::udp_server(mutex).await;
+    let mut input = String::new();
+    udp::udp_server(mutex, stdin_rx);
+    loop {
+        io::stdin().read_line(&mut input).unwrap_or(0);
+        if input != "quit" {
+            stdin_tx.send(input.clone()).unwrap();
+        }
+        else {
+            break;
+        }
+    }
 }
 
 fn main() -> std::io::Result<()> {
