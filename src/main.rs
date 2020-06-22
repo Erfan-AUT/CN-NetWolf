@@ -1,6 +1,9 @@
+pub const STATIC_DIR: &'static str = "./static/";
+pub const BUF_SIZE: usize = 8192;
 mod node;
 mod dir;
 mod udp;
+mod tcp;
 use futures::executor::block_on;
 use std::sync::Mutex;
 

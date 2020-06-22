@@ -6,11 +6,13 @@ use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-mod get;
+pub mod get;
+use crate::tcp;
+use crate::BUF_SIZE;
 
 const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
-const BUF_SIZE: usize = 8192;
+
 const REFRESH_INTERVAL_MS: u128 = 1000;
 
 fn generate_socket() -> UdpSocket {
@@ -19,10 +21,10 @@ fn generate_socket() -> UdpSocket {
         let udp_server_addr = generate_address(LOCALHOST, current_server_port);
         let _try_socket = match UdpSocket::bind(udp_server_addr) {
             Ok(sckt) => {
-                let timeout:Duration = Duration::new(3, 0);
+                let timeout: Duration = Duration::new(3, 0);
                 sckt.set_write_timeout(Some(timeout)).unwrap();
                 sckt.set_read_timeout(Some(timeout)).unwrap();
-                return sckt
+                return sckt;
             }
             Err(_) => (),
         };
@@ -93,7 +95,6 @@ async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
     if is_request {
         udp_get_requester(socket, mutex).await;
     } else {
-        // Don't respond if you don't have the file!
         udp_get_responder(socket).await;
     }
 }
@@ -107,9 +108,10 @@ async fn udp_get_responder(socket: &UdpSocket) {
         Ok(req) => req,
         Err(_) => return,
     };
+    println!("{}", src);
+    // Don't respond if you don't have the file!
     // For the reason why "contains" is not used, please refer to:
     // https://github.com/rust-lang/rust/issues/42671
-    println!("{}", src);
     if dir::file_list().iter().any(|x| x == &request.file_name) {
         let target = node::Node::new("", &src.ip().to_string(), src.port());
         let response = get::GETPair::with_random_port(&request.file_name);
@@ -118,6 +120,9 @@ async fn udp_get_responder(socket: &UdpSocket) {
             Ok(__) => __,
             Err(_) => return,
         };
+        // Just spawn it wouthout any care to what happens next.
+        tcp::tcp_get_sender(response);
+        println!("Ohh yeah!");
     }
 }
 
@@ -125,7 +130,8 @@ async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::
     let nodes_ptr = mutex.lock().unwrap();
     let nodes = &*nodes_ptr;
     let mut min_duration = Duration::new(3, 0);
-    let mut tcp_pair: (String, get::GETPair);
+    // basically empty at first.
+    let mut tcp_pair: (String, get::GETPair) = (String::new(), get::GETPair::new("", 0));
     let request = get::GETPair::random_get();
     for node in &**nodes {
         let start_time = Instant::now();
@@ -154,6 +160,7 @@ async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::
     // Checking that there was an ACK.
     if Duration::new(3, 0) > min_duration {
         // Spawn TCP
+        tcp::tcp_get_receiver(tcp_pair);
         println!("ooh yeaah");
     }
 }
