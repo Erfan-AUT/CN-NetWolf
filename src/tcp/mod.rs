@@ -1,13 +1,12 @@
 use crate::udp::{generate_address, get::GETPair};
-use crate::{BUF_SIZE, STATIC_DIR};
+use crate::{BUF_SIZE, STATIC_DIR, LOCALHOST};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-const LOCALHOST: &str = "127.0.0.1";
-
 fn generate_file_address(file_name: &str, sr: bool) -> String {
-    let mut file_addr = String::from(STATIC_DIR);
+    let ptr_string = &*STATIC_DIR.lock().unwrap();
+    let mut file_addr = String::from(ptr_string);
     file_addr.push_str(file_name);
     if sr {
         file_addr.push_str("-1.txt");
@@ -51,7 +50,7 @@ pub async fn tcp_get_sender(starting_point: GETPair) -> std::io::Result<()> {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
     };
-
+    // Basically only handles one client but whatever. :))
     for stream in listener.incoming() {
         handle_client(stream?, &starting_point.file_name)?;
     }

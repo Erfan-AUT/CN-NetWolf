@@ -35,7 +35,8 @@ impl GETPair {
     }
 
     pub fn from_str(input: &str) -> Result<GETPair, ParseIntError> {
-        let pair_strs: Vec<&str> = input.split(" ").collect();
+        // Skip header!
+        let pair_strs: Vec<&str> = input.split(" ").skip(1).collect();
         Ok(GETPair {
             file_name: pair_strs[0].to_string(),
             tcp_port: pair_strs[1].parse()?,
@@ -52,13 +53,15 @@ impl GETPair {
         }
     }
 
-    pub fn random_get() -> GETPair {
+    pub fn with_random_file() -> GETPair {
         let mut rng = rand::thread_rng();
-        let tcp_port = rng.gen_range(PORT_MIN, PORT_MAX);
-        // null means that the node is presenting itself as a sender.
         let request_options = ["mamad.txt", "reza.mp4", "ahmad.png"];
         let option_index = rng.gen_range(0, request_options.len());
         let random_option = request_options[option_index];
-        GETPair::new(random_option, tcp_port)
+        GETPair::new(random_option, 0)
+    }
+
+    pub fn header() -> &'static str {
+        "GET:\n"
     }
 }

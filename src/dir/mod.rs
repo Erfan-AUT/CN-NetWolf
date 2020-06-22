@@ -1,9 +1,8 @@
 
 use std::fs;
-use crate::STATIC_DIR;
 
-pub fn file_list() -> Vec<String> {
-    let paths = fs::read_dir(STATIC_DIR).unwrap();
+pub fn file_list(directory: &str) -> Vec<String> {
+    let paths = fs::read_dir(directory).unwrap();
     let mut result = vec![];
     for path in paths {
         let path_str = path.unwrap().file_name().to_str().unwrap().to_string();

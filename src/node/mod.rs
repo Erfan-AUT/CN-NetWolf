@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::{fmt, fs};
 // Make sure to read from an LF file!
-const INIT_NODE_FILE: &str = "./nodes.txt";
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Node {
@@ -54,7 +53,8 @@ impl Node {
     pub fn multiple_from_string(data: String) -> HashSet<Node> {
         let mut nodes: HashSet<Node> = HashSet::new();
         let split_by_line = data.split("\n");
-        for line in split_by_line {
+        // Skip header!
+        for line in split_by_line.skip(1) {
             let node_strs: Vec<&str> = line.split(" ").collect();
             println!("{:?}", node_strs);
             // #communications with this new node is zero!
@@ -66,6 +66,10 @@ impl Node {
             nodes.insert(node);
         }
         nodes
+    }
+
+    pub fn header() -> &'static str {
+        "DISC:\n"
     }
 }
 
@@ -80,7 +84,7 @@ fn str_to_u8_vector(ip_str: &str) -> Vec<u8> {
     ip_parsed
 }
 
-pub fn read_starting_nodes() -> HashSet<Node> {
-    let data = fs::read_to_string(INIT_NODE_FILE).expect("Something's wrong with the file.");
+pub fn read_starting_nodes(file_dir: &str) -> HashSet<Node> {
+    let data = fs::read_to_string(file_dir).expect("Something's wrong with the file.");
     return Node::multiple_from_string(data);
 }
