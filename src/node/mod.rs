@@ -9,6 +9,24 @@ pub struct Node {
     pub name: String,
     pub ip: Ipv4Addr,
     pub port: u16,
+    pub prior_communications: u16,
+}
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {}", self.name, self.ip, self.port)
+    }
+}
+
+impl Default for Node {
+    fn default() -> Node {
+        Node {
+            name: String::new(),
+            ip: Ipv4Addr::new(0, 0, 0, 0),
+            port: 0,
+            prior_communications: 0,
+        }
+    }
 }
 
 impl Node {
@@ -18,6 +36,7 @@ impl Node {
             name: String::from(name_str),
             ip: Ipv4Addr::new(ip_parsed[0], ip_parsed[1], ip_parsed[2], ip_parsed[3]),
             port,
+            ..Default::default()
         }
     }
 
@@ -45,12 +64,6 @@ impl Node {
             nodes.insert(node);
         }
         nodes
-    }
-}
-
-impl fmt::Display for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {} {}", self.name, self.ip, self.port)
     }
 }
 

@@ -16,6 +16,15 @@ impl fmt::Display for GETPair {
     }
 }
 
+impl Default for GETPair {
+    fn default() -> GETPair {
+        GETPair {
+            file_name: String::new(),
+            tcp_port: 0,
+        }
+    }
+}
+
 impl GETPair {
     pub fn new(file_name: &str, tcp_port: u16) -> GETPair {
         let file_name = file_name.to_string();
@@ -39,7 +48,7 @@ impl GETPair {
         let tcp_port = rng.gen_range(PORT_MIN, PORT_MAX);
         GETPair {
             file_name,
-            tcp_port
+            tcp_port,
         }
     }
 

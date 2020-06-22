@@ -130,8 +130,7 @@ async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::
     let nodes_ptr = mutex.lock().unwrap();
     let nodes = &*nodes_ptr;
     let mut min_duration = Duration::new(3, 0);
-    // basically empty at first.
-    let mut tcp_pair: (String, get::GETPair) = (String::new(), get::GETPair::new("", 0));
+    let mut tcp_pair: (String, get::GETPair) = (String::new(), Default::default());
     let request = get::GETPair::random_get();
     for node in &**nodes {
         let start_time = Instant::now();
