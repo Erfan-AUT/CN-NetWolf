@@ -79,7 +79,6 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
             Ok((string, __)) => (string, __),
             Err(_) => continue,
         };
-        // println!("{}", received_nodes_str);
         let mut new_nodes = node::Node::multiple_from_string(received_nodes_str);
         // Removes it if the receiving node itself is encountered
         new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
@@ -89,16 +88,14 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
 }
 
 async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
-    udp_get_responder(socket).await;
-
-    // let mut rng = rand::thread_rng();
-    // let is_request = rng.gen::<bool>();
-    // if is_request {
-    //     udp_get_requester(socket, mutex).await;
-    // } else {
-    //     // Don't respond if you don't have the file!
-    //     udp_get_responder(socket).await;
-    // }
+    let mut rng = rand::thread_rng();
+    let is_request = rng.gen::<bool>();
+    if is_request {
+        udp_get_requester(socket, mutex).await;
+    } else {
+        // Don't respond if you don't have the file!
+        udp_get_responder(socket).await;
+    }
 }
 
 async fn udp_get_responder(socket: &UdpSocket) {
@@ -166,12 +163,12 @@ pub async fn udp_server(mutex: Mutex<&mut HashSet<node::Node>>) {
     println!("generated socket successfully!");
     let mut start_time = Instant::now();
     loop {
-        // let duration = start_time.elapsed();
-        // if duration.as_millis() > REFRESH_INTERVAL_MS {
-        //     udp_discovery_server(&socket, &mutex);
-        //     start_time = Instant::now();
-        //     continue;
-        // }
+        let duration = start_time.elapsed();
+        if duration.as_millis() > REFRESH_INTERVAL_MS {
+            udp_discovery_server(&socket, &mutex);
+            start_time = Instant::now();
+            continue;
+        }
         udp_get_server(&socket, &mutex).await;
     }
 }
