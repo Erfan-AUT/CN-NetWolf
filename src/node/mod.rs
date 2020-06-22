@@ -56,6 +56,8 @@ impl Node {
         let split_by_line = data.split("\n");
         for line in split_by_line {
             let node_strs: Vec<&str> = line.split(" ").collect();
+            println!("{:?}", node_strs);
+            // #communications with this new node is zero!
             let node = Node::new(
                 node_strs[0],
                 node_strs[1],

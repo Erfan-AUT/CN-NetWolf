@@ -6,6 +6,7 @@ mod udp;
 mod tcp;
 use futures::executor::block_on;
 use std::sync::Mutex;
+use std::env;
 
 async fn async_main() {
     let mut _nodes = node::read_starting_nodes();
@@ -14,6 +15,7 @@ async fn async_main() {
 }
 
 fn main() -> std::io::Result<()> {
+    env::set_var("RUST_BACKTRACE", "1");
     block_on(async_main());
     Ok(())
 }

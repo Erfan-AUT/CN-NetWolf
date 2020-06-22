@@ -12,8 +12,13 @@ use crate::BUF_SIZE;
 
 const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
-
 const REFRESH_INTERVAL_MS: u128 = 1000;
+
+#[derive(PartialEq)]
+enum PacketType {
+    Node,
+    GETPair,
+} 
 
 fn generate_socket() -> UdpSocket {
     let mut current_server_port = UDP_SERVER_PORT;
@@ -49,7 +54,7 @@ fn send_bytes_to_socket(
     socket.send_to(data, target_addr)
 }
 
-fn receive_string_from_socket(socket: &UdpSocket) -> Result<(String, SocketAddr), Error> {
+fn receive_string_from_socket(socket: &UdpSocket) -> Result<(String, SocketAddr, PacketType), Error> {
     let mut buf = [0; BUF_SIZE];
     //This is hyst a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
@@ -59,9 +64,16 @@ fn receive_string_from_socket(socket: &UdpSocket) -> Result<(String, SocketAddr)
     };
     //This is where the data is fully received
     match std::str::from_utf8(&buf[..amt]) {
-        Ok(string) => Ok((string.to_string(), src)),
+        Ok(string) => Ok((string.to_string(), src, discovery_or_get(string))),
         Err(_) => Err(err),
     }
+}
+
+fn discovery_or_get(input_string: &str) -> PacketType {
+    if input_string.len() == 2 {
+        return PacketType::GETPair
+    }
+    PacketType::Node
 }
 
 fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
@@ -77,8 +89,8 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
             Ok(__) => __,
             Err(_) => continue,
         };
-        let (received_nodes_str, _) = match receive_string_from_socket(socket) {
-            Ok((string, __)) => (string, __),
+        let (received_nodes_str, _, packet_type) = match receive_string_from_socket(socket) {
+            Ok((string, __, pkt_type)) => (string, __, pkt_type),
             Err(_) => continue,
         };
         let mut new_nodes = node::Node::multiple_from_string(received_nodes_str);
@@ -100,15 +112,15 @@ async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
 }
 
 async fn udp_get_responder(socket: &UdpSocket) {
-    let (result_string, src) = match receive_string_from_socket(socket) {
-        Ok((string, src)) => (string, src),
+    let (result_string, src, packet_type) = match receive_string_from_socket(socket) {
+        Ok((string, src, pkt_type)) => (string, src, pkt_type),
         Err(_) => return,
     };
     let request = match get::GETPair::from_str(&result_string) {
         Ok(req) => req,
         Err(_) => return,
     };
-    println!("{}", src);
+    println!("Responding to GET request from: {}", src);
     // Don't respond if you don't have the file!
     // For the reason why "contains" is not used, please refer to:
     // https://github.com/rust-lang/rust/issues/42671
@@ -121,8 +133,8 @@ async fn udp_get_responder(socket: &UdpSocket) {
             Err(_) => return,
         };
         // Just spawn it wouthout any care to what happens next.
-        tcp::tcp_get_sender(response);
-        println!("Ohh yeah!");
+        println!("Starting TCP Send server");
+        tcp::tcp_get_sender(response).await;
     }
 }
 
@@ -140,10 +152,13 @@ async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::
                 Ok(__) => __,
                 Err(_) => continue,
             };
-            let (get_pair_string, src) = match receive_string_from_socket(socket) {
-                Ok((string, src)) => (string, src),
+            let (get_pair_string, src, packet_type) = match receive_string_from_socket(socket) {
+                Ok((string, src, pkt_type)) => (string, src, pkt_type),
                 Err(_) => continue,
             };
+            if packet_type == PacketType::GETPair {
+                
+            }
             let duration = start_time.elapsed();
             let response = match get::GETPair::from_str(&get_pair_string) {
                 Ok(res) => res,
@@ -159,8 +174,9 @@ async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::
     // Checking that there was an ACK.
     if Duration::new(3, 0) > min_duration {
         // Spawn TCP
-        tcp::tcp_get_receiver(tcp_pair);
-        println!("ooh yeaah");
+        println!("Starting TCP Receive server");
+        // This await is only for debugging purposes.
+        tcp::tcp_get_receiver(tcp_pair).await;
     }
 }
 
@@ -170,11 +186,13 @@ pub async fn udp_server(mutex: Mutex<&mut HashSet<node::Node>>) {
     let mut start_time = Instant::now();
     loop {
         let duration = start_time.elapsed();
+        // Discovery mode
         if duration.as_millis() > REFRESH_INTERVAL_MS {
             udp_discovery_server(&socket, &mutex);
             start_time = Instant::now();
             continue;
         }
+        // GET mode
         udp_get_server(&socket, &mutex).await;
     }
 }

@@ -6,16 +6,19 @@ use std::net::{TcpListener, TcpStream};
 
 const LOCALHOST: &str = "127.0.0.1";
 
-fn generate_file_address(file_name: &str) -> String {
+fn generate_file_address(file_name: &str, sr: bool) -> String {
     let mut file_addr = String::from(STATIC_DIR);
     file_addr.push_str(file_name);
+    if sr {
+        file_addr.push_str("-1.txt");
+    }
     file_addr
 }
 
 pub async fn tcp_get_receiver((ip, res): (String, GETPair)) -> std::io::Result<()> {
     let stream = TcpStream::connect(generate_address(&ip, res.tcp_port))?;
     let mut tcp_input_stream = BufReader::new(stream);
-    let file_addr = generate_file_address(&res.file_name);
+    let file_addr = generate_file_address(&res.file_name, true);
     let f = File::open(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
     let mut buf = [0; BUF_SIZE];
@@ -29,7 +32,7 @@ pub async fn tcp_get_receiver((ip, res): (String, GETPair)) -> std::io::Result<(
 
 pub fn handle_client(stream: TcpStream, file_name: &str) -> std::io::Result<()> {
     let mut tcp_output_steam = BufWriter::new(stream);
-    let file_addr = generate_file_address(file_name);
+    let file_addr = generate_file_address(file_name, false);
     let f = File::open(file_addr)?;
     let mut file_input_stream = BufReader::new(f);
     let mut buf = [0; BUF_SIZE];
