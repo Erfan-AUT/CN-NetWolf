@@ -8,11 +8,11 @@ const INIT_NODE_FILE: &str = "./nodes.txt";
 pub struct Node {
     pub name: String,
     pub ip: Ipv4Addr,
-    pub port: i32,
+    pub port: u16,
 }
 
 impl Node {
-    pub fn new(name_str: &str, ip_str: &str, port: i32) -> Node {
+    pub fn new(name_str: &str, ip_str: &str, port: u16) -> Node {
         let ip_parsed = str_to_u8_vector(ip_str);
         Node {
             name: String::from(name_str),
@@ -40,7 +40,7 @@ impl Node {
             let node = Node::new(
                 node_strs[0],
                 node_strs[1],
-                node_strs[2].parse::<i32>().unwrap(),
+                node_strs[2].parse::<u16>().unwrap(),
             );
             nodes.insert(node);
         }

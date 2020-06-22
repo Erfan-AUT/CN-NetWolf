@@ -1,5 +1,5 @@
-use crate::node;
 use crate::dir;
+use crate::node;
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 mod get;
 
-const UDP_SERVER_PORT: i32 = 3222;
+const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
 const BUF_SIZE: usize = 8192;
 const REFRESH_INTERVAL_MS: u128 = 1000;
@@ -18,15 +18,19 @@ fn generate_socket() -> UdpSocket {
     loop {
         let udp_server_addr = generate_address(LOCALHOST, current_server_port);
         let _try_socket = match UdpSocket::bind(udp_server_addr) {
-            Ok(sckt) => return sckt,
+            Ok(sckt) => {
+                let timeout:Duration = Duration::new(3, 0);
+                sckt.set_write_timeout(Some(timeout)).unwrap();
+                sckt.set_read_timeout(Some(timeout)).unwrap();
+                return sckt
+            }
             Err(_) => (),
         };
         current_server_port += 1;
     }
 }
 
-
-pub fn generate_address(ip: &str, port: i32) -> String {
+pub fn generate_address(ip: &str, port: u16) -> String {
     let mut addr = String::from(ip);
     addr.push_str(":");
     addr.push_str(&port.to_string());
@@ -75,7 +79,7 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
             Ok((string, __)) => (string, __),
             Err(_) => continue,
         };
-        println!("{}", received_nodes_str);
+        // println!("{}", received_nodes_str);
         let mut new_nodes = node::Node::multiple_from_string(received_nodes_str);
         // Removes it if the receiving node itself is encountered
         new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
@@ -85,14 +89,16 @@ fn udp_discovery_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Nod
 }
 
 async fn udp_get_server(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
-    let mut rng = rand::thread_rng();
-    let is_request = rng.gen::<bool>();
-    if is_request {
-        udp_get_requester(socket, mutex).await;
-    } else {
-        // Don't respond if you don't have the file!
-        udp_get_responder(socket).await;
-    }
+    udp_get_responder(socket).await;
+
+    // let mut rng = rand::thread_rng();
+    // let is_request = rng.gen::<bool>();
+    // if is_request {
+    //     udp_get_requester(socket, mutex).await;
+    // } else {
+    //     // Don't respond if you don't have the file!
+    //     udp_get_responder(socket).await;
+    // }
 }
 
 async fn udp_get_responder(socket: &UdpSocket) {
@@ -104,13 +110,18 @@ async fn udp_get_responder(socket: &UdpSocket) {
         Ok(req) => req,
         Err(_) => return,
     };
-    let target = node::Node::new("", &src.to_string(), request.tcp_port);
-    let response = get::GETPair::with_random_port(&request.file_name);
-    // Sending ACK
-    let _ = match send_bytes_to_socket(response.to_string().as_bytes(), &target, socket) {
-        Ok(__) => __,
-        Err(_) => return,
-    };
+    // For the reason why "contains" is not used, please refer to:
+    // https://github.com/rust-lang/rust/issues/42671
+    println!("{}", src);
+    if dir::file_list().iter().any(|x| x == &request.file_name) {
+        let target = node::Node::new("", &src.ip().to_string(), src.port());
+        let response = get::GETPair::with_random_port(&request.file_name);
+        // Sending ACK
+        let _ = match send_bytes_to_socket(response.to_string().as_bytes(), &target, socket) {
+            Ok(__) => __,
+            Err(_) => return,
+        };
+    }
 }
 
 async fn udp_get_requester(socket: &UdpSocket, mutex: &Mutex<&mut HashSet<node::Node>>) {
@@ -155,12 +166,12 @@ pub async fn udp_server(mutex: Mutex<&mut HashSet<node::Node>>) {
     println!("generated socket successfully!");
     let mut start_time = Instant::now();
     loop {
-        let duration = start_time.elapsed();
-        if duration.as_millis() > REFRESH_INTERVAL_MS {
-            udp_discovery_server(&socket, &mutex);
-            start_time = Instant::now();
-            continue;
-        }
+        // let duration = start_time.elapsed();
+        // if duration.as_millis() > REFRESH_INTERVAL_MS {
+        //     udp_discovery_server(&socket, &mutex);
+        //     start_time = Instant::now();
+        //     continue;
+        // }
         udp_get_server(&socket, &mutex).await;
     }
 }

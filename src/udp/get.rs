@@ -2,22 +2,22 @@ use rand::Rng;
 use std::fmt;
 use std::num::ParseIntError;
 
-const PORT_MIN: i32 = 2000;
-const PORT_MAX: i32 = 5000;
+const PORT_MIN: u16 = 2000;
+const PORT_MAX: u16 = 5000;
 
 pub struct GETPair {
     pub file_name: String,
-    pub tcp_port: i32,
+    pub tcp_port: u16,
 }
 
 impl fmt::Display for GETPair {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}, {}", self.file_name, self.tcp_port)
+        write!(f, "{} {}", self.file_name, self.tcp_port)
     }
 }
 
 impl GETPair {
-    pub fn new(file_name: &str, tcp_port: i32) -> GETPair {
+    pub fn new(file_name: &str, tcp_port: u16) -> GETPair {
         let file_name = file_name.to_string();
         GETPair {
             file_name,
