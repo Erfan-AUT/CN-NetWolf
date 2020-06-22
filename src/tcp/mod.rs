@@ -21,11 +21,18 @@ pub async fn tcp_get_receiver((ip, res): (String, GETPair)) -> std::io::Result<(
     let file_addr = generate_file_address(&res.file_name, true);
     let f = File::open(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
+    handle_both(&mut tcp_input_stream, &mut file_output_stream)
+}
+
+pub fn handle_both<T: Read, U: Write>(
+    input: &mut BufReader<T>,
+    output: &mut BufWriter<U>,
+) -> std::io::Result<()> {
     let mut buf = [0; BUF_SIZE];
     let mut size: usize = 1;
     while size > 0 {
-        size = tcp_input_stream.read(&mut buf)?;
-        file_output_stream.write(&buf)?;
+        size = input.read(&mut buf)?;
+        output.write(&buf)?;
     }
     Ok(())
 }
@@ -35,13 +42,7 @@ pub fn handle_client(stream: TcpStream, file_name: &str) -> std::io::Result<()> 
     let file_addr = generate_file_address(file_name, false);
     let f = File::open(file_addr)?;
     let mut file_input_stream = BufReader::new(f);
-    let mut buf = [0; BUF_SIZE];
-    let mut size: usize = 1;
-    while size > 0 {
-        size = file_input_stream.read(&mut buf)?;
-        tcp_output_steam.write(&buf)?;
-    }
-    Ok(())
+    handle_both(&mut file_input_stream, &mut tcp_output_steam)
 }
 
 pub async fn tcp_get_sender(starting_point: GETPair) -> std::io::Result<()> {
