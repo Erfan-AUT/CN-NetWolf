@@ -40,7 +40,7 @@ impl Node {
     }
 
     pub fn nodes_to_string(nodes: &HashSet<Node>) -> String {
-        let mut nodes_string = String::from("");
+        let mut nodes_string = String::from(Node::header());
         for node in nodes {
             let a = node.to_string();
             nodes_string.push_str(&a);
@@ -92,7 +92,7 @@ impl Node {
     }
 
     pub fn header() -> &'static str {
-        "DISC:\n"
+        "DISC\n"
     }
 }
 

@@ -104,7 +104,7 @@ pub fn discovery_server(
         }
         let mut nodes_ptr = nodes_mutex.lock().unwrap();
         nodes_ptr.extend(received_nodes);
-        println!("{:?}", nodes_ptr);
+        // println!("{:?}", nodes_ptr);
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
@@ -118,12 +118,13 @@ pub fn discovery_server(
                 };
             }
         }
+        drop(nodes_ptr);
         thread::sleep(discovery_interval);
     }
 }
 
 pub fn GET_ACK_header() -> &'static str {
-    "GET/ACK\n"
+    "ACK\n"
 }
 
 pub fn GET_header() -> &'static str {
@@ -131,7 +132,7 @@ pub fn GET_header() -> &'static str {
 }
 
 pub fn stdin_GET_header() -> &'static str {
-    "get "
+    "get"
 }
 
 pub fn get_server(
@@ -147,34 +148,36 @@ pub fn get_server(
         // If the node is unknown, insert it into our currently known nodes.
         let data = &data_pair.0;
         let addr = &(&data_pair.1).to_string();
+        println!("The data is: {}", data);
+        println!("The addr is: {}", addr);
         // Wanted to put this entire sneaky node shenanigan in an inline function,
         // But apparently rust's inline functions are just not really good:
         // https://github.com/rust-lang/rust/issues/14527
-        let mut current_node = &node::Node::short_single_from_string(addr);
+        let mut current_node = node::Node::short_single_from_string(addr);
         let nodes_mutex = nodes_arc.clone();
         let nodes_ptr = nodes_mutex.lock().unwrap();
-        let nodes = &*nodes_ptr;
-        for node in nodes {
+        for node in &*nodes_ptr {
             if node.is_sneaky_node(addr) {
-                current_node = node;
+                current_node = node.clone();
                 break;
             }
         }
-
+        drop(nodes_ptr);
         let mut data_lines = data.lines();
         // Send ACK to GET request
-        if data_lines.next().unwrap().starts_with(GET_header()) {
+        if data_lines.next().unwrap().starts_with(GET_header().trim()) {
             // Becomes useless, so why should it keep the mutex?
-            drop(nodes);
             let file_name = &data_lines.next().unwrap();
             // Don't respond if you don't have the file!
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
             if dir::file_list().iter().any(|x| x == file_name) {
+                println!("Recognizing the existence of the requested file.");
                 let mut response = String::from(GET_ACK_header());
                 response.push_str(&crate::TCP_PORT.to_string());
                 response.push('\n');
                 response.push_str(&file_name);
+                println!("The proper response is: {}", response);
                 let socket_mutex = socket_arc.lock().unwrap();
                 let socket = &*socket_mutex;
                 let _ = match send_bytes_to_socket(
@@ -182,17 +185,27 @@ pub fn get_server(
                     &current_node,
                     socket,
                 ) {
-                    Ok(__) => __,
-                    Err(_) => return,
+                    Ok(__) => (),
+                    Err(_) => continue,
                 };
+                println!("No problem sending data over UDP Socket.");
                 // This one's too functional programming-y. :)))
-                let mut current_clone = current_node.clone();
-                current_clone.prior_communications += 1;
+                current_node.prior_communications += 1;
                 // This is to signify that our previous immutable borrow is invalid from now on.
-                let mut nodes_ptr = nodes_mutex.lock().unwrap();
-                nodes_ptr.remove(current_node);
-                nodes_ptr.insert(current_clone);
+                let mut nodes_ptr = match nodes_mutex.lock() {
+                    Ok(ptr) => ptr,
+                    Err(e) => {
+                        println!("{}", e);
+                        continue;
+                    }
+                };
+                println!("No problem Unlocking the mutex again");
+                nodes_ptr.retain(|k| {
+                    &generate_address(&k.ip.to_string(), k.port)
+                        != &generate_address(&current_node.ip.to_string(), current_node.port)
+                });
                 let prior_node_comms = current_node.prior_communications;
+                nodes_ptr.insert(current_node);
                 // Unlock the mutex because it's not needed anymore, but it'll linger on for too long.
                 drop(nodes_ptr);
                 println!("Starting TCP Send server");
@@ -208,12 +221,15 @@ pub fn get_server(
         else {
             let mut tcp_socket_addr = data_pair.1.clone();
             let port_str = data_lines.next().unwrap();
+            println!("Port string is: {}", port_str);
             tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
             let file_name = data_lines.next().unwrap().to_string();
+            println!("Starting TCP Receive Server");
             std::thread::spawn(move || tcp::tcp_get_receiver(tcp_socket_addr.clone(), file_name));
         }
     }
 }
+
 
 pub fn get_client(
     receiver: Receiver<String>,
@@ -225,25 +241,36 @@ pub fn get_client(
             Ok(data) => data,
             Err(_) => continue,
         };
+        println!("Received data");
         let mut commands = input.split(" ");
         let arg = commands.next().unwrap();
+
+        println!("{}", arg);
+        println!("{}", stdin_GET_header());
+        println!("{}", arg.starts_with(stdin_GET_header()));
+
         if arg.starts_with("list") {
             let value = nodes_arc.lock().unwrap();
             println!("{:?}", value);
         } else if arg.starts_with(stdin_GET_header()) {
+            println!("Understand GET");
             // Make sure there is a file name!
             let file_name = match commands.next() {
-                Some(cmd) => cmd,
+                Some(cmd) => cmd.trim(),
                 None => continue,
             };
+            println!("Waiting for socket acq.");
             let socket_mutex = socket_arc.lock().unwrap();
             let socket = &*socket_mutex;
+            println!("Waiting for nodes acq.");
             let nodes_ptr = nodes_arc.lock().unwrap();
             let nodes = &*nodes_ptr;
+            println!("Preparing to broadcast GET");
             for node in nodes {
+                println!("GET sent to {}", node);
                 let mut request = String::from(GET_header());
-                request.push('\n');
                 request.push_str(file_name);
+                println!("The request is: {}", request);
                 send_bytes_to_socket(request.as_bytes(), node, socket).unwrap_or(0);
             }
         }

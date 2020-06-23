@@ -25,9 +25,8 @@ fn random_tcp_port() -> u16 {
     r.gen_range(PORT_MIN, PORT_MAX)
 }
 
-
 fn main() -> std::io::Result<()> {
-    env::set_var("RUST_BACKTRACE", "1");
+    env::set_var("RUST_BACKTRACE", "full");
     let matches = App::new("Netwolf?")
         .version("BROTHER")
         .author("Conan O'Brien <conan@teamcoco.com>")
@@ -51,11 +50,11 @@ fn main() -> std::io::Result<()> {
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
     *STATIC_DIR.lock().unwrap() = static_dir;
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
-
+    let init_dir_string = init_nodes_dir.to_string();
+    std::thread::spawn(move || udp::udp_server(init_dir_string, stdin_rx));
     let mut input = String::new();
-    udp::udp_server(init_nodes_dir.to_string(), stdin_rx);
     loop {
-        io::stdin().read_line(&mut input).unwrap_or(0);
+        io::stdin().read_line(&mut input)?;
         if input != "quit" {
             stdin_tx.send(input.clone()).unwrap();
         } else {
