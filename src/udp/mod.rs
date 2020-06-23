@@ -2,7 +2,7 @@ use crate::{dir, node, tcp, BUF_SIZE};
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{mpsc, mpsc::Receiver, Arc, Mutex};
+use std::sync::{mpsc, mpsc::Receiver, Arc, RwLock};
 use std::time::Duration;
 use std::{thread, time};
 
@@ -51,10 +51,10 @@ fn send_bytes_to_socket(
 }
 
 fn receive_string_from_socket(
-    socket_arc: Arc<Mutex<UdpSocket>>,
+    socket_arc: Arc<RwLock<UdpSocket>>
 ) -> Result<(String, SocketAddr), Error> {
-    let socket_mutex = &*socket_arc;
-    let socket = socket_mutex.lock().unwrap();
+    let socket_arc = socket_arc.clone();
+    let socket = &*socket_arc.read().unwrap();
     let mut buf = [0; BUF_SIZE];
     //This is hyst a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
@@ -78,15 +78,15 @@ fn discovery_or_get(input_string: &str) -> PacketType {
 
 pub fn discovery_server(
     receiver: Receiver<String>,
-    socket_arc: Arc<Mutex<UdpSocket>>,
-    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+    socket_arc: Arc<RwLock<UdpSocket>>,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
     let local_address: String;
     let discovery_interval = time::Duration::from_millis(DISCOVERY_INTERVAL_MS);
-    let nodes_mutex = nodes_arc.clone();
+    let nodes_rwlock = nodes_arc.clone();
     {
-        let socket_mutex = socket_arc.lock().unwrap();
-        let socket = &*socket_mutex;
+        let socket_rwlock = socket_arc.read().unwrap();
+        let socket = &*socket_rwlock;
         local_address = socket.local_addr().unwrap().to_string();
     }
     loop {
@@ -102,17 +102,17 @@ pub fn discovery_server(
             new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
             received_nodes.extend(new_nodes);
         }
-        let mut nodes_ptr = nodes_mutex.lock().unwrap();
+        let mut nodes_ptr = nodes_rwlock.write().unwrap();
         nodes_ptr.extend(received_nodes);
         drop(nodes_ptr);
-        let nodes_ptr = nodes_mutex.lock().unwrap();
+        let nodes_ptr = nodes_rwlock.read().unwrap();
         // println!("{:?}", nodes_ptr);
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
         {
-            let socket_mutex = socket_arc.lock().unwrap();
-            let socket = &*socket_mutex;
+            let socket_rwlock = socket_arc.write().unwrap();
+            let socket = &*socket_rwlock;
             for node in nodes {
                 let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, socket) {
                     Ok(__) => __,
@@ -139,8 +139,8 @@ pub fn stdin_GET_header() -> &'static str {
 
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
-    socket_arc: Arc<Mutex<UdpSocket>>,
-    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+    socket_arc: Arc<RwLock<UdpSocket>>,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
     loop {
         let data_pair: (String, SocketAddr) = match receiver.recv() {
@@ -156,8 +156,8 @@ pub fn get_server(
         // But apparently rust's inline functions are just not really good:
         // https://github.com/rust-lang/rust/issues/14527
         let mut current_node = node::Node::short_single_from_string(addr);
-        let nodes_mutex = nodes_arc.clone();
-        let nodes_ptr = nodes_mutex.lock().unwrap();
+        let nodes_rwlock = nodes_arc.clone();
+        let nodes_ptr = nodes_rwlock.read().unwrap();
         for node in &*nodes_ptr {
             if node.is_sneaky_node(addr) {
                 current_node = node.clone();
@@ -168,7 +168,7 @@ pub fn get_server(
         let mut data_lines = data.lines();
         // Send ACK to GET request
         if data_lines.next().unwrap().starts_with(GET_header().trim()) {
-            // Becomes useless, so why should it keep the mutex?
+            // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
             // Don't respond if you don't have the file!
             // For the reason why "contains" is not used, please refer to:
@@ -180,8 +180,8 @@ pub fn get_server(
                 response.push('\n');
                 response.push_str(&file_name);
                 println!("The proper response is: {}", response);
-                let socket_mutex = socket_arc.lock().unwrap();
-                let socket = &*socket_mutex;
+                let socket_rwlock = socket_arc.write().unwrap();
+                let socket = &*socket_rwlock;
                 let _ = match send_bytes_to_socket(
                     response.to_string().as_bytes(),
                     &current_node,
@@ -190,25 +190,24 @@ pub fn get_server(
                     Ok(__) => (),
                     Err(_) => continue,
                 };
+                drop(socket_rwlock);
                 println!("No problem sending data over UDP Socket.");
-                // This one's too functional programming-y. :)))
                 current_node.prior_communications += 1;
-                // This is to signify that our previous immutable borrow is invalid from now on.
-                let mut nodes_ptr = match nodes_mutex.lock() {
+                let mut nodes_ptr = match nodes_rwlock.write() {
                     Ok(ptr) => ptr,
                     Err(e) => {
                         println!("{}", e);
                         continue;
                     }
                 };
-                println!("No problem Unlocking the mutex again");
+                println!("No problem Unlocking the rwlock again");
                 nodes_ptr.retain(|k| {
                     &generate_address(&k.ip.to_string(), k.port)
                         != &generate_address(&current_node.ip.to_string(), current_node.port)
                 });
                 let prior_node_comms = current_node.prior_communications;
                 nodes_ptr.insert(current_node);
-                // Unlock the mutex because it's not needed anymore, but it'll linger on for too long.
+                // Unlock the rwlock because it's not needed anymore, but it'll linger on for too long.
                 drop(nodes_ptr);
                 println!("Starting TCP Send server");
                 let addr_string = addr.to_string();
@@ -235,8 +234,8 @@ pub fn get_server(
 
 pub fn get_client(
     receiver: Receiver<String>,
-    socket_arc: Arc<Mutex<UdpSocket>>,
-    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+    socket_arc: Arc<RwLock<UdpSocket>>,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
     loop {
         let input = match receiver.recv() {
@@ -252,7 +251,7 @@ pub fn get_client(
         println!("{}", arg.starts_with(stdin_GET_header()));
 
         if arg.starts_with("list") {
-            let value = nodes_arc.lock().unwrap();
+            let value = nodes_arc.read().unwrap();
             println!("{:?}", value);
         } else if arg.starts_with(stdin_GET_header()) {
             println!("Understand GET");
@@ -262,10 +261,10 @@ pub fn get_client(
                 None => continue,
             };
             println!("Waiting for socket acq.");
-            let socket_mutex = socket_arc.lock().unwrap();
-            let socket = &*socket_mutex;
+            let socket_rwlock = socket_arc.write().unwrap();
+            let socket = &*socket_rwlock;
             println!("Waiting for nodes acq.");
-            let nodes_ptr = nodes_arc.lock().unwrap();
+            let nodes_ptr = nodes_arc.read().unwrap();
             let nodes = &*nodes_ptr;
             println!("Preparing to broadcast GET");
             for node in nodes {
@@ -282,18 +281,18 @@ pub fn get_client(
 pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // The fact whether or not this actually gets updated is still a question. :)))
     let nodes = node::read_starting_nodes(&init_nodes_dir);
-    let nodes_mutex = Mutex::new(nodes);
+    let nodes_rwlock = RwLock::new(nodes);
     let socket = generate_socket();
-    let socket_mutex = Mutex::new(socket);
-    let socket_arc = Arc::new(socket_mutex);
-    let nodes_arc = Arc::new(nodes_mutex);
+    let socket_rwlock = RwLock::new(socket);
+    let socket_arc = Arc::new(socket_rwlock);
+    let nodes_arc = Arc::new(nodes_rwlock);
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
     let socket_arc_disc_clone = socket_arc.clone();
     let node_arc_disc_clone = nodes_arc.clone();
-    // thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
+    thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
     let socket_arc_get_clone = socket_arc.clone();
     let node_arc_get_clone = nodes_arc.clone();
     thread::spawn(|| get_server(get_rx, socket_arc_get_clone, node_arc_get_clone));
@@ -309,6 +308,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
+        // This function is the only one reading from the socket!
         data_addr_pair = match receive_string_from_socket(socket_arc.clone()) {
             Ok((string, addr)) => (string, addr),
             Err(_) => continue,
