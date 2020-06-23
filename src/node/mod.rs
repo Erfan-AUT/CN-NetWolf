@@ -50,22 +50,32 @@ impl Node {
         nodes_string.truncate(nodes_string.trim_end().len());
         nodes_string
     }
-    pub fn multiple_from_string(data: String) -> HashSet<Node> {
+    pub fn multiple_from_string(data: String, trim: bool) -> HashSet<Node> {
         let mut nodes: HashSet<Node> = HashSet::new();
         let split_by_line = data.split("\n");
         // Skip header!
-        for line in split_by_line.skip(1) {
-            let node_strs: Vec<&str> = line.split(" ").collect();
-            println!("{:?}", node_strs);
-            // #communications with this new node is zero!
-            let node = Node::new(
-                node_strs[0],
-                node_strs[1],
-                node_strs[2].parse::<u16>().unwrap(),
-            );
-            nodes.insert(node);
+        if trim {
+            for line in split_by_line.skip(1) {
+                Node::single_from_string(line, &mut nodes);
+            }
+        }
+        else {
+            for line in split_by_line {
+                Node::single_from_string(line, &mut nodes);
+            }
         }
         nodes
+    }
+
+    fn single_from_string(line: &str, nodes: &mut HashSet<Node>) {
+        let node_strs: Vec<&str> = line.split(" ").collect();
+        // #communications with this new node is zero!
+        let node = Node::new(
+            node_strs[0],
+            node_strs[1],
+            node_strs[2].parse::<u16>().unwrap(),
+        );
+        nodes.insert(node);
     }
 
     pub fn header() -> &'static str {
@@ -86,5 +96,5 @@ fn str_to_u8_vector(ip_str: &str) -> Vec<u8> {
 
 pub fn read_starting_nodes(file_dir: &str) -> HashSet<Node> {
     let data = fs::read_to_string(file_dir).expect("Something's wrong with the file.");
-    return Node::multiple_from_string(data);
+    return Node::multiple_from_string(data, false);
 }

@@ -24,7 +24,7 @@ fn generate_socket() -> UdpSocket {
         let udp_server_addr = generate_address(LOCALHOST, current_server_port);
         let _try_socket = match UdpSocket::bind(udp_server_addr) {
             Ok(sckt) => {
-                let timeout: Duration = Duration::new(3, 0);
+                let timeout: Duration = Duration::new(1, 0);
                 sckt.set_write_timeout(Some(timeout)).unwrap();
                 sckt.set_read_timeout(Some(timeout)).unwrap();
                 return sckt;
@@ -99,12 +99,13 @@ pub fn discovery_server(
                 Ok(data) => data,
                 Err(_) => break,
             };
-            let mut new_nodes = node::Node::multiple_from_string(data);
+            let mut new_nodes = node::Node::multiple_from_string(data, true);
             new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
             received_nodes.extend(new_nodes);
         }
         let mut nodes_ptr = nodes_mutex.lock().unwrap();
         nodes_ptr.extend(received_nodes);
+        println!("{:?}", nodes_ptr);
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
