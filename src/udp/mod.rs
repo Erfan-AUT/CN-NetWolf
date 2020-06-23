@@ -1,4 +1,4 @@
-use crate::{dir, node, tcp, BUF_SIZE};
+use crate::{dir, node, tcp, BUF_SIZE, CURRENT_TCP_CLIENTS, MAX_TCP_CLIENTS};
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
@@ -51,7 +51,7 @@ fn send_bytes_to_socket(
 }
 
 fn receive_string_from_socket(
-    socket_arc: Arc<RwLock<UdpSocket>>
+    socket_arc: Arc<RwLock<UdpSocket>>,
 ) -> Result<(String, SocketAddr), Error> {
     let socket_arc = socket_arc.clone();
     let socket = &*socket_arc.read().unwrap();
@@ -170,10 +170,11 @@ pub fn get_server(
         if data_lines.next().unwrap().starts_with(GET_header().trim()) {
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
+            let client_count = *CURRENT_TCP_CLIENTS.read().unwrap();
             // Don't respond if you don't have the file!
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
-            if dir::file_list().iter().any(|x| x == file_name) {
+            if dir::file_list().iter().any(|x| x == file_name) && client_count > MAX_TCP_CLIENTS {
                 println!("Recognizing the existence of the requested file.");
                 let mut response = String::from(GET_ACK_header());
                 response.push_str(&crate::TCP_PORT.to_string());
@@ -210,12 +211,11 @@ pub fn get_server(
                 // Unlock the rwlock because it's not needed anymore, but it'll linger on for too long.
                 drop(nodes_ptr);
                 println!("Starting TCP Send server");
-                let addr_string = addr.to_string();
+                let ip_string = data_pair.1.ip().to_string();
                 let file_name_string = file_name.to_string();
                 std::thread::spawn(move || {
-                    tcp::tcp_get_sender(addr_string, file_name_string, prior_node_comms)
+                    tcp::tcp_get_sender(ip_string, file_name_string, prior_node_comms)
                 });
-                // tcp::tcp_get_sender(file_name, prior_node_comms).unwrap();
             }
         }
         // Connect to a node that has ACK'd one of your previous requests.
@@ -230,7 +230,6 @@ pub fn get_server(
         }
     }
 }
-
 
 pub fn get_client(
     receiver: Receiver<String>,

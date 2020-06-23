@@ -3,7 +3,7 @@ use std::fs;
 use crate::STATIC_DIR;
 
 pub fn file_list() -> Vec<String> {
-    let dir_lock = STATIC_DIR.lock().unwrap();
+    let dir_lock = STATIC_DIR.read().unwrap();
     let dir = &*dir_lock;
     let paths = fs::read_dir(dir).unwrap();
     let mut result = vec![];
@@ -13,7 +13,3 @@ pub fn file_list() -> Vec<String> {
     }
     result
 }
-
-// println!("Name: {}", path_str);
-// let data = fs::read_to_string(path_str).expect("Something's wrong with the file.");
-// println!("{}", data);
