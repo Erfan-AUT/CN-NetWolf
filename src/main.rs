@@ -5,10 +5,9 @@ mod node;
 mod tcp;
 mod udp;
 use clap::{App, Arg};
-use futures::executor::block_on;
 use rand::Rng;
+use std::sync::{mpsc, Mutex};
 use std::{env, io};
-use std::sync::{Mutex, mpsc};
 
 // pub const STATIC_DIR: &'static str = "./static/";
 pub const BUF_SIZE: usize = 8192;
@@ -26,43 +25,42 @@ fn random_tcp_port() -> u16 {
     r.gen_range(PORT_MIN, PORT_MAX)
 }
 
-async fn async_main() {
+
+fn main() -> std::io::Result<()> {
+    env::set_var("RUST_BACKTRACE", "1");
     let matches = App::new("Netwolf?")
         .version("BROTHER")
         .author("Conan O'Brien <conan@teamcoco.com>")
         .about("Has an IQ of 160")
-        .arg(Arg::with_name("list")
-                 .short('l')
-                 .long("list")
-                 .takes_value(true)
-                 .about("A file containing the list of this node's initial known nodes"))
-        .arg(Arg::with_name("dir")
-                 .short('d')
-                 .long("directory")
-                 .takes_value(true)
-                 .about("The directory whose files this node is going to share."))
+        .arg(
+            Arg::with_name("list")
+                .short('l')
+                .long("list")
+                .takes_value(true)
+                .about("A file containing the list of this node's initial known nodes"),
+        )
+        .arg(
+            Arg::with_name("dir")
+                .short('d')
+                .long("directory")
+                .takes_value(true)
+                .about("The directory whose files this node is going to share."),
+        )
         .get_matches();
     let init_nodes_dir = matches.value_of("list").unwrap_or("nodes.txt");
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
     *STATIC_DIR.lock().unwrap() = static_dir;
-    let mut _nodes = node::read_starting_nodes(init_nodes_dir);
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
-    let mutex = Mutex::new(&mut _nodes);
+
     let mut input = String::new();
-    udp::udp_server(mutex, stdin_rx);
+    udp::udp_server(init_nodes_dir.to_string(), stdin_rx);
     loop {
         io::stdin().read_line(&mut input).unwrap_or(0);
         if input != "quit" {
             stdin_tx.send(input.clone()).unwrap();
-        }
-        else {
+        } else {
             break;
         }
     }
-}
-
-fn main() -> std::io::Result<()> {
-    env::set_var("RUST_BACKTRACE", "1");
-    block_on(async_main());
     Ok(())
 }

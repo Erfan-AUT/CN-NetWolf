@@ -1,9 +1,9 @@
-use crate::{dir, tcp, node, BUF_SIZE};
+use crate::{dir, node, tcp, BUF_SIZE};
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{Mutex, mpsc, mpsc::Receiver};
+use std::sync::{mpsc, mpsc::Receiver, Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{thread, time};
 pub mod get;
@@ -16,7 +16,7 @@ const DISCOVERY_INTERVAL_MS: u64 = 1000;
 enum PacketType {
     Node,
     GETPair,
-} 
+}
 
 fn generate_socket() -> UdpSocket {
     let mut current_server_port = UDP_SERVER_PORT;
@@ -52,8 +52,11 @@ fn send_bytes_to_socket(
     socket.send_to(data, target_addr)
 }
 
-fn receive_string_from_socket(socket_mutex: &Mutex<&UdpSocket>) -> Result<(String, SocketAddr), Error> {
-    let socket = *socket_mutex.lock().unwrap();
+fn receive_string_from_socket(
+    socket_arc: Arc<Mutex<UdpSocket>>,
+) -> Result<(String, SocketAddr), Error> {
+    let socket_mutex = socket_arc.clone();
+    let socket = &*socket_mutex.lock().unwrap();
     let mut buf = [0; BUF_SIZE];
     //This is hyst a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
@@ -70,16 +73,22 @@ fn receive_string_from_socket(socket_mutex: &Mutex<&UdpSocket>) -> Result<(Strin
 
 fn discovery_or_get(input_string: &str) -> PacketType {
     if input_string.starts_with(get::GETPair::header()) {
-        return PacketType::GETPair
+        return PacketType::GETPair;
     }
     PacketType::Node
 }
 
-pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&UdpSocket>, nodes_mutex: &Mutex<&mut HashSet<node::Node>>) {
+pub fn discovery_server(
+    receiver: Receiver<String>,
+    socket_arc: Arc<Mutex<UdpSocket>>,
+    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+) {
     let local_address: String;
     let discovery_interval = time::Duration::from_millis(DISCOVERY_INTERVAL_MS);
+    let socket_mutex = socket_arc.clone();
+    let nodes_mutex = nodes_arc.clone();
     {
-        let socket = *socket_mutex.lock().unwrap();
+        let socket = &*socket_mutex.lock().unwrap();
         local_address = socket.local_addr().unwrap().to_string();
     }
     loop {
@@ -88,7 +97,7 @@ pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&
         loop {
             let data = match receiver.try_recv() {
                 Ok(data) => data,
-                Err(_) => break
+                Err(_) => break,
             };
             let mut new_nodes = node::Node::multiple_from_string(data);
             new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
@@ -100,9 +109,9 @@ pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
         {
-            let socket = *socket_mutex.lock().unwrap();
-            for node in &**nodes {
-                let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, socket) {
+            let socket = &*socket_mutex.lock().unwrap();
+            for node in nodes {
+                let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, &socket) {
                     Ok(__) => __,
                     Err(_) => continue,
                 };
@@ -112,25 +121,28 @@ pub async fn discovery_server(receiver: Receiver<String>, socket_mutex: &Mutex<&
     }
 }
 
-pub async fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_mutex: &Mutex<&UdpSocket>) {
+pub fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_arc: Arc<Mutex<UdpSocket>>) {}
 
-
-}
-
-pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>, stdin_rx: Receiver<String>) {
+pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
+    let mut nodes = node::read_starting_nodes(&init_nodes_dir);
+    let nodes_mutex = Mutex::new(nodes);
     let socket = generate_socket();
-    let socket_mutex = Mutex::new(&socket);
+    let socket_mutex = Mutex::new(socket);
+    let socket_arc = Arc::new(socket_mutex);
+    let nodes_arc = Arc::new(nodes_mutex);
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
-    discovery_server(discovery_rx, &socket_mutex, &nodes_mutex);
-    get_server(get_rx, &socket_mutex);
+    let socket_arc_clone = socket_arc.clone();
+    let node_arc_clone = nodes_arc.clone();
+    thread::spawn(|| discovery_server(discovery_rx, socket_arc_clone, node_arc_clone));
+    // get_server(get_rx, &socket_mutex);
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
-        data_addr_pair = match receive_string_from_socket(&socket_mutex) {
+        data_addr_pair = match receive_string_from_socket(socket_arc.clone()) {
             Ok((string, addr)) => (string, addr),
-            Err(_) => continue
+            Err(_) => continue,
         };
         // Because
         if discovery_or_get(&data_addr_pair.0) == PacketType::Node {
@@ -138,8 +150,7 @@ pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>, stdin_rx: 
                 Ok(_) => (),
                 Err(_) => (),
             };
-        }
-        else {
+        } else {
             match get_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),
@@ -148,13 +159,13 @@ pub async fn udp_server(nodes_mutex: Mutex<&mut HashSet<node::Node>>, stdin_rx: 
         loop {
             let input = match stdin_rx.try_recv() {
                 Ok(data) => data,
-                Err(_) => break
+                Err(_) => break,
             };
             if input.starts_with("list") {
-                println!("{:?}", *nodes_mutex.lock().unwrap());
-            }
-            else if input.starts_with("get") {
-                
+                let arc = nodes_arc.clone();
+                let value = arc.lock().unwrap();
+                println!("{:?}", value);
+            } else if input.starts_with("get") {
             }
         }
     }
