@@ -104,6 +104,8 @@ pub fn discovery_server(
         }
         let mut nodes_ptr = nodes_mutex.lock().unwrap();
         nodes_ptr.extend(received_nodes);
+        drop(nodes_ptr);
+        let nodes_ptr = nodes_mutex.lock().unwrap();
         // println!("{:?}", nodes_ptr);
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
@@ -291,7 +293,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
     let socket_arc_disc_clone = socket_arc.clone();
     let node_arc_disc_clone = nodes_arc.clone();
-    thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
+    // thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
     let socket_arc_get_clone = socket_arc.clone();
     let node_arc_get_clone = nodes_arc.clone();
     thread::spawn(|| get_server(get_rx, socket_arc_get_clone, node_arc_get_clone));

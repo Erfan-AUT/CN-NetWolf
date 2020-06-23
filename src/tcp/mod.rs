@@ -67,12 +67,14 @@ pub fn tcp_get_sender(
         let strm = stream?;
         // Make sure you're responding to the right client!
         if strm.local_addr()?.ip().to_string() == incoming_addr {
+            println!("Accepted Client");
             if prior_comms > 0 {
                 delay = CONGESTION_DELAY_MS;
             }
             handle_client(strm, &file_name, delay)?;
             break;
         }
+        println!("Refused Client");
     }
     Ok(())
 }
