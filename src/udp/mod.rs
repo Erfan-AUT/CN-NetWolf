@@ -94,6 +94,7 @@ pub fn discovery_server(
     loop {
         let mut received_nodes: HashSet<node::Node> = HashSet::new();
         // Read until there are no more incoming disccovery packets.
+        // This should not wait for data and do its job indefinitely.
         loop {
             let data = match receiver.try_recv() {
                 Ok(data) => data,
@@ -131,6 +132,10 @@ pub fn GET_header() -> &'static str {
     "GET\n"
 }
 
+pub fn stdin_GET_header() -> &'static str {
+    "get\n"
+}
+
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
     socket_arc: Arc<Mutex<UdpSocket>>,
@@ -138,7 +143,7 @@ pub fn get_server(
 ) {
     loop {
         loop {
-            let data_pair: (String, SocketAddr) = match receiver.try_recv() {
+            let data_pair: (String, SocketAddr) = match receiver.recv() {
                 Ok(data) => data,
                 Err(_) => break,
             };
@@ -222,11 +227,31 @@ pub fn get_client(
     nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
 ) {
     loop {
-        loop {
-            let data = match receiver.try_recv() {
-                Ok(data) => data,
-                Err(_) => break,
+        let input = match receiver.recv() {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
+        let mut commands = input.split(" ");
+        let arg = commands.next().unwrap();
+        if arg.starts_with("list") {
+            let value = nodes_arc.lock().unwrap();
+            println!("{:?}", value);
+        } else if arg.starts_with("get") {
+            // Make sure there is a file name!
+            let file_name = match commands.next() {
+                Some(cmd) => cmd,
+                None => continue,
             };
+            let socket_mutex = socket_arc.lock().unwrap();
+            let socket = &*socket_mutex;
+            let nodes_ptr = nodes_arc.lock().unwrap();
+            let nodes = &*nodes_ptr;
+            for node in nodes {
+                let mut request = String::from(GET_header());
+                request.push('\n');
+                request.push_str(file_name);
+                send_bytes_to_socket(request.as_bytes(), node, socket).unwrap_or(0);
+            }
         }
     }
 }
@@ -242,6 +267,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
+    let (get_client_tx, get_client_rx) = mpsc::channel::<String>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
     let socket_arc_disc_clone = socket_arc.clone();
     let node_arc_disc_clone = nodes_arc.clone();
@@ -249,6 +275,15 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let socket_arc_get_clone = socket_arc.clone();
     let node_arc_get_clone = nodes_arc.clone();
     thread::spawn(|| get_server(get_rx, socket_arc_get_clone, node_arc_get_clone));
+    let socket_arc_get_client_clone = socket_arc.clone();
+    let node_arc_get_client_clone = nodes_arc.clone();
+    std::thread::spawn(|| {
+        get_client(
+            stdin_rx,
+            socket_arc_get_client_clone,
+            node_arc_get_client_clone,
+        )
+    });
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
@@ -265,19 +300,6 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
             match get_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),
-            }
-        }
-        loop {
-            let input = match stdin_rx.try_recv() {
-                Ok(data) => data,
-                Err(_) => break,
-            };
-            if input.starts_with("list") {
-                let arc = nodes_arc.clone();
-                let value = arc.lock().unwrap();
-                println!("{:?}", value);
-            } else if input.starts_with("get") {
-                stdin_tx.
             }
         }
     }
