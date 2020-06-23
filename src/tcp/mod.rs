@@ -1,4 +1,4 @@
-use crate::udp::{generate_address, get::GETPair};
+use crate::udp::{generate_address};
 use crate::{BUF_SIZE, LOCALHOST, STATIC_DIR};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
