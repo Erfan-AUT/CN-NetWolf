@@ -158,10 +158,12 @@ pub fn get_server(
                     break;
                 }
             }
-            drop(nodes);
+
             let mut data_lines = data.lines();
             // Send ACK to GET request
             if data_lines.next().unwrap().starts_with(GET_header()) {
+                // Becomes useless, so why should it keep the mutex?
+                drop(nodes);
                 let file_name = &data_lines.next().unwrap();
                 // Don't respond if you don't have the file!
                 // For the reason why "contains" is not used, please refer to:
@@ -169,6 +171,8 @@ pub fn get_server(
                 if dir::file_list().iter().any(|x| x == file_name) {
                     let mut response = String::from(GET_ACK_header());
                     response.push_str(&crate::TCP_PORT.to_string());
+                    response.push('\n');
+                    response.push_str(&file_name);
                     let socket_mutex = socket_arc.lock().unwrap();
                     let socket = &*socket_mutex;
                     let _ = match send_bytes_to_socket(
@@ -190,13 +194,39 @@ pub fn get_server(
                     // Unlock the mutex because it's not needed anymore, but it'll linger on for too long.
                     drop(nodes_ptr);
                     println!("Starting TCP Send server");
-                    tcp::tcp_get_sender(addr, file_name, prior_node_comms);
+                    let addr_string = addr.to_string();
+                    let file_name_string = file_name.to_string();
+                    std::thread::spawn(move || {
+                        tcp::tcp_get_sender(addr_string, file_name_string, prior_node_comms)
+                    });
                     // tcp::tcp_get_sender(file_name, prior_node_comms).unwrap();
                 }
             }
             // Connect to a node that has ACK'd one of your previous requests.
             else {
+                let mut tcp_socket_addr = data_pair.1.clone();
+                let port_str = data_lines.next().unwrap();
+                tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
+                let file_name = data_lines.next().unwrap().to_string();
+                std::thread::spawn(move || {
+                    tcp::tcp_get_receiver(tcp_socket_addr.clone(), file_name)
+                });
             }
+        }
+    }
+}
+
+pub fn get_client(
+    receiver: Receiver<String>,
+    socket_arc: Arc<Mutex<UdpSocket>>,
+    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+) {
+    loop {
+        loop {
+            let data = match receiver.try_recv() {
+                Ok(data) => data,
+                Err(_) => break,
+            };
         }
     }
 }
@@ -247,6 +277,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
                 let value = arc.lock().unwrap();
                 println!("{:?}", value);
             } else if input.starts_with("get") {
+                stdin_tx.
             }
         }
     }

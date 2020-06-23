@@ -2,11 +2,11 @@ use crate::udp::{generate_address, get::GETPair};
 use crate::{BUF_SIZE, LOCALHOST, STATIC_DIR};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, SocketAddr};
 use std::{thread, time};
 
 const CONGESTION_DELAY_MS: u64 = 500;
-const MAX_PRIOR: u16 = 3;
+// const MAX_PRIOR: u16 = 3;
 
 fn generate_file_address(file_name: &str, sr: bool) -> String {
     let ptr_string = &*STATIC_DIR.lock().unwrap();
@@ -18,10 +18,10 @@ fn generate_file_address(file_name: &str, sr: bool) -> String {
     file_addr
 }
 
-pub fn tcp_get_receiver((ip, res): (String, GETPair)) -> std::io::Result<()> {
-    let stream = TcpStream::connect(generate_address(&ip, res.tcp_port))?;
+pub fn tcp_get_receiver(addr:SocketAddr, file_name: String) -> std::io::Result<()> {
+    let stream = TcpStream::connect(addr)?;
     let mut tcp_input_stream = BufReader::new(stream);
-    let file_addr = generate_file_address(&res.file_name, true);
+    let file_addr = generate_file_address(&file_name, true);
     let f = File::open(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
     handle_both(&mut tcp_input_stream, &mut file_output_stream, 0)
@@ -43,24 +43,21 @@ pub fn handle_both<T: Read, U: Write>(
     Ok(())
 }
 
-pub fn handle_client(stream: TcpStream, file_name: &str) -> std::io::Result<()> {
+pub fn handle_client(stream: TcpStream, file_name: &str, delay: u64) -> std::io::Result<()> {
     let mut tcp_output_steam = BufWriter::new(stream);
     let file_addr = generate_file_address(file_name, false);
     let f = File::open(file_addr)?;
     let mut file_input_stream = BufReader::new(f);
-    handle_both(
-        &mut file_input_stream,
-        &mut tcp_output_steam,
-        CONGESTION_DELAY_MS,
-    )
+    handle_both(&mut file_input_stream, &mut tcp_output_steam, delay)
 }
 
 pub fn tcp_get_sender(
-    incoming_addr: &str,
-    file_name: &str,
+    incoming_addr: String,
+    file_name: String,
     prior_comms: u16,
 ) -> std::io::Result<()> {
     let tcp_addr = generate_address(LOCALHOST, *crate::TCP_PORT);
+    let mut delay: u64 = 0;
     let listener = match TcpListener::bind(tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
@@ -70,7 +67,10 @@ pub fn tcp_get_sender(
         let strm = stream?;
         // Make sure you're responding to the right client!
         if strm.local_addr()?.ip().to_string() == incoming_addr {
-            handle_client(strm, file_name)?;
+            if prior_comms > 0 {
+                delay = CONGESTION_DELAY_MS;
+            }
+            handle_client(strm, &file_name, delay)?;
             break;
         }
     }
