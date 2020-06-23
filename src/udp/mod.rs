@@ -55,8 +55,8 @@ fn send_bytes_to_socket(
 fn receive_string_from_socket(
     socket_arc: Arc<Mutex<UdpSocket>>,
 ) -> Result<(String, SocketAddr), Error> {
-    let socket_mutex = socket_arc.clone();
-    let socket = &*socket_mutex.lock().unwrap();
+    let socket_mutex = &*socket_arc;
+    let socket = socket_mutex.lock().unwrap();
     let mut buf = [0; BUF_SIZE];
     //This is hyst a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
@@ -85,10 +85,10 @@ pub fn discovery_server(
 ) {
     let local_address: String;
     let discovery_interval = time::Duration::from_millis(DISCOVERY_INTERVAL_MS);
-    let socket_mutex = socket_arc.clone();
     let nodes_mutex = nodes_arc.clone();
     {
-        let socket = &*socket_mutex.lock().unwrap();
+        let socket_mutex = socket_arc.lock().unwrap();
+        let socket = &*socket_mutex;
         local_address = socket.local_addr().unwrap().to_string();
     }
     loop {
@@ -109,9 +109,10 @@ pub fn discovery_server(
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
         {
-            let socket = &*socket_mutex.lock().unwrap();
+            let socket_mutex = socket_arc.lock().unwrap();
+            let socket = &*socket_mutex;
             for node in nodes {
-                let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, &socket) {
+                let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, socket) {
                     Ok(__) => __,
                     Err(_) => continue,
                 };
@@ -121,9 +122,12 @@ pub fn discovery_server(
     }
 }
 
-pub fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_arc: Arc<Mutex<UdpSocket>>) {}
+pub fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_arc: Arc<Mutex<UdpSocket>>) {
+
+}
 
 pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
+    // The fact whether or not this actually gets updated is still a question. :)))
     let mut nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_mutex = Mutex::new(nodes);
     let socket = generate_socket();
@@ -133,6 +137,8 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
+    
+    //Spawn the clones first kids! Don't do it while calling the function. :)))))))
     let socket_arc_clone = socket_arc.clone();
     let node_arc_clone = nodes_arc.clone();
     thread::spawn(|| discovery_server(discovery_rx, socket_arc_clone, node_arc_clone));
