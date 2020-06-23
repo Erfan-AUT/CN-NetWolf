@@ -72,10 +72,10 @@ fn receive_string_from_socket(
 }
 
 fn discovery_or_get(input_string: &str) -> PacketType {
-    if input_string.starts_with(get::GETPair::header()) {
-        return PacketType::GETPair;
+    if input_string.starts_with(node::Node::header()) {
+        return PacketType::Node;
     }
-    PacketType::Node
+    PacketType::GETPair
 }
 
 pub fn discovery_server(
@@ -123,13 +123,87 @@ pub fn discovery_server(
     }
 }
 
-pub fn get_server(receiver: Receiver<(String, SocketAddr)>, socket_arc: Arc<Mutex<UdpSocket>>) {
+pub fn GET_ACK_header() -> &'static str {
+    "GET/ACK\n"
+}
 
+pub fn GET_header() -> &'static str {
+    "GET\n"
+}
+
+pub fn get_server(
+    receiver: Receiver<(String, SocketAddr)>,
+    socket_arc: Arc<Mutex<UdpSocket>>,
+    nodes_arc: Arc<Mutex<HashSet<node::Node>>>,
+) {
+    loop {
+        loop {
+            let data_pair: (String, SocketAddr) = match receiver.try_recv() {
+                Ok(data) => data,
+                Err(_) => break,
+            };
+            // If the node is unknown, insert it into our currently known nodes.
+            let data = &data_pair.0;
+            let addr = &(&data_pair.1).to_string();
+            // Wanted to put this entire sneaky node shenanigan in an inline function,
+            // But apparently rust's inline functions are just not really good:
+            // https://github.com/rust-lang/rust/issues/14527
+            let mut current_node = &node::Node::short_single_from_string(addr);
+            let nodes_mutex = nodes_arc.clone();
+            let nodes_ptr = nodes_mutex.lock().unwrap();
+            let nodes = &*nodes_ptr;
+            for node in nodes {
+                if node.is_sneaky_node(addr) {
+                    current_node = node;
+                    break;
+                }
+            }
+            drop(nodes);
+            let mut data_lines = data.lines();
+            // Send ACK to GET request
+            if data_lines.next().unwrap().starts_with(GET_header()) {
+                let file_name = &data_lines.next().unwrap();
+                // Don't respond if you don't have the file!
+                // For the reason why "contains" is not used, please refer to:
+                // https://github.com/rust-lang/rust/issues/42671
+                if dir::file_list().iter().any(|x| x == file_name) {
+                    let mut response = String::from(GET_ACK_header());
+                    response.push_str(&crate::TCP_PORT.to_string());
+                    let socket_mutex = socket_arc.lock().unwrap();
+                    let socket = &*socket_mutex;
+                    let _ = match send_bytes_to_socket(
+                        response.to_string().as_bytes(),
+                        &current_node,
+                        socket,
+                    ) {
+                        Ok(__) => __,
+                        Err(_) => return,
+                    };
+                    // This one's too functional programming-y. :)))
+                    let mut current_clone = current_node.clone();
+                    current_clone.prior_communications += 1;
+                    // This is to signify that our previous immutable borrow is invalid from now on.
+                    let mut nodes_ptr = nodes_mutex.lock().unwrap();
+                    nodes_ptr.remove(current_node);
+                    nodes_ptr.insert(current_clone);
+                    let prior_node_comms = current_node.prior_communications;
+                    // Unlock the mutex because it's not needed anymore, but it'll linger on for too long.
+                    drop(nodes_ptr);
+                    println!("Starting TCP Send server");
+                    tcp::tcp_get_sender(addr, file_name, prior_node_comms);
+                    // tcp::tcp_get_sender(file_name, prior_node_comms).unwrap();
+                }
+            }
+            // Connect to a node that has ACK'd one of your previous requests.
+            else {
+            }
+        }
+    }
 }
 
 pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // The fact whether or not this actually gets updated is still a question. :)))
-    let mut nodes = node::read_starting_nodes(&init_nodes_dir);
+    let nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_mutex = Mutex::new(nodes);
     let socket = generate_socket();
     let socket_mutex = Mutex::new(socket);
@@ -138,12 +212,13 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     println!("generated socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
-    
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
-    let socket_arc_clone = socket_arc.clone();
-    let node_arc_clone = nodes_arc.clone();
-    thread::spawn(|| discovery_server(discovery_rx, socket_arc_clone, node_arc_clone));
-    // get_server(get_rx, &socket_mutex);
+    let socket_arc_disc_clone = socket_arc.clone();
+    let node_arc_disc_clone = nodes_arc.clone();
+    thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
+    let socket_arc_get_clone = socket_arc.clone();
+    let node_arc_get_clone = nodes_arc.clone();
+    thread::spawn(|| get_server(get_rx, socket_arc_get_clone, node_arc_get_clone));
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
@@ -151,7 +226,6 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
             Ok((string, addr)) => (string, addr),
             Err(_) => continue,
         };
-        // Because
         if discovery_or_get(&data_addr_pair.0) == PacketType::Node {
             match discovery_tx.send(data_addr_pair.0) {
                 Ok(_) => (),

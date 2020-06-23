@@ -3,7 +3,7 @@ use std::net::Ipv4Addr;
 use std::{fmt, fs};
 // Make sure to read from an LF file!
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub struct Node {
     pub name: String,
     pub ip: Ipv4Addr,
@@ -50,24 +50,32 @@ impl Node {
         nodes_string.truncate(nodes_string.trim_end().len());
         nodes_string
     }
+
+    pub fn is_sneaky_node(&self, other_str: &str) -> bool {
+        self.to_short_string() == other_str.to_string()
+    }
+
+    pub fn to_short_string(&self) -> String {
+        format!("{}:{}", self.ip, self.port)
+    }
+
     pub fn multiple_from_string(data: String, trim: bool) -> HashSet<Node> {
         let mut nodes: HashSet<Node> = HashSet::new();
         let split_by_line = data.split("\n");
         // Skip header!
         if trim {
             for line in split_by_line.skip(1) {
-                Node::single_from_string(line, &mut nodes);
+                Node::insert_single_from_string(line, &mut nodes);
             }
-        }
-        else {
+        } else {
             for line in split_by_line {
-                Node::single_from_string(line, &mut nodes);
+                Node::insert_single_from_string(line, &mut nodes);
             }
         }
         nodes
     }
 
-    fn single_from_string(line: &str, nodes: &mut HashSet<Node>) {
+    fn insert_single_from_string(line: &str, nodes: &mut HashSet<Node>) {
         let node_strs: Vec<&str> = line.split(" ").collect();
         // #communications with this new node is zero!
         let node = Node::new(
@@ -76,6 +84,11 @@ impl Node {
             node_strs[2].parse::<u16>().unwrap(),
         );
         nodes.insert(node);
+    }
+
+    pub fn short_single_from_string(line: &str) -> Node {
+        let node_strs: Vec<&str> = line.split(":").collect();
+        Node::new("Sneaky", node_strs[0], node_strs[1].parse::<u16>().unwrap())
     }
 
     pub fn header() -> &'static str {
