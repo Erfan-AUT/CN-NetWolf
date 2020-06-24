@@ -142,14 +142,18 @@ pub fn get_server(
         drop(nodes_ptr);
         let mut data_lines = data.lines();
         // Send ACK to GET request
-        if data_lines.next().unwrap().starts_with(headers::PacketHeader::get().trim()) {
+        if data_lines
+            .next()
+            .unwrap()
+            .starts_with(headers::PacketHeader::get().trim())
+        {
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
             let client_count = *CURRENT_TCP_CLIENTS.read().unwrap();
             // Don't respond if you don't have the file!
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
-            if dir::file_list().iter().any(|x| x == file_name) && client_count > MAX_TCP_CLIENTS {
+            if dir::file_list().iter().any(|x| x == file_name) && MAX_TCP_CLIENTS > client_count {
                 info!("Recognizing the existence of the requested file.");
                 let mut response = String::from(headers::PacketHeader::ack());
                 response.push_str(&crate::TCP_PORT.to_string());
@@ -260,14 +264,14 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let nodes_arc = Arc::new(nodes_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
-    let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
+    let (get_server_tx, get_server_rx) = mpsc::channel::<(String, SocketAddr)>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
     let socket_arc_disc_clone = socket_arc.clone();
     let node_arc_disc_clone = nodes_arc.clone();
     thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
     let socket_arc_get_clone = socket_arc.clone();
     let node_arc_get_clone = nodes_arc.clone();
-    thread::spawn(|| get_server(get_rx, socket_arc_get_clone, node_arc_get_clone));
+    thread::spawn(|| get_server(get_server_rx, socket_arc_get_clone, node_arc_get_clone));
     let socket_arc_get_client_clone = socket_arc.clone();
     let node_arc_get_client_clone = nodes_arc.clone();
     std::thread::spawn(|| {
@@ -291,8 +295,8 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
                 Ok(_) => (),
                 Err(_) => (),
             };
-        } else if header == headers::PacketHeader::GET {
-            match get_tx.send(data_addr_pair) {
+        } else if header == headers::PacketHeader::GETACK {
+            match get_server_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),
             }

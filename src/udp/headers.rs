@@ -1,6 +1,4 @@
-
-
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum PacketHeader {
     Disc,
     GET,
@@ -32,24 +30,28 @@ impl PacketHeader {
         "SR\n"
     }
 
-    pub fn packet_type(header: &str) -> PacketHeader {
+    pub fn packet_type(packet_str: &str) -> PacketHeader {
         // Doing this repetitive work because the following PR has not been merged as of today:
         // https://github.com/rust-lang/rfcs/pull/2920
         const DISCOVERY: &'static str = PacketHeader::discovery();
         const GET: &'static str = PacketHeader::get();
         const ACK: &'static str = PacketHeader::ack();
+        let header_str = packet_str.lines().next().unwrap_or("");
+        let header = [header_str, "\n"].join("");
+        if header.starts_with(DISCOVERY) {
+            PacketHeader::Disc
+        } else if header.starts_with(GET) {
+            PacketHeader::GET
+        } else if header.starts_with(ACK) {
+            PacketHeader::GETACK
+        } else {
+            PacketHeader::Unrecognized
+        }
+    }
+    pub fn transfer_packet_type() {
         const STOP_AND_WAIT: &'static str = PacketHeader::stop_and_wait();
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
         const SELECTIVE_REPEAT: &'static str = PacketHeader::selective_repeat();
-        match header {
-            DISCOVERY => PacketHeader::Disc,
-            GET => PacketHeader::GET,
-            ACK => PacketHeader::GETACK,
-            STOP_AND_WAIT => PacketHeader::StopWait,
-            GO_BACK_N => PacketHeader::GoBackN,
-            SELECTIVE_REPEAT => PacketHeader::SRepeat,
-            &_ => PacketHeader::Unrecognized
-        }
     }
 }
 
