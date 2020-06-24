@@ -5,6 +5,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::{mpsc, mpsc::Receiver, Arc, RwLock};
 use std::time::Duration;
 use std::{thread, time};
+use log::{info, warn};
 
 const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
@@ -106,7 +107,6 @@ pub fn discovery_server(
         nodes_ptr.extend(received_nodes);
         drop(nodes_ptr);
         let nodes_ptr = nodes_rwlock.read().unwrap();
-        // println!("{:?}", nodes_ptr);
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
         // Just to make sure the socket's lock get released in the end.
@@ -150,8 +150,6 @@ pub fn get_server(
         // If the node is unknown, insert it into our currently known nodes.
         let data = &data_pair.0;
         let addr = &(&data_pair.1).to_string();
-        println!("The data is: {}", data);
-        println!("The addr is: {}", addr);
         // Wanted to put this entire sneaky node shenanigan in an inline function,
         // But apparently rust's inline functions are just not really good:
         // https://github.com/rust-lang/rust/issues/14527
@@ -175,12 +173,12 @@ pub fn get_server(
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
             if dir::file_list().iter().any(|x| x == file_name) && client_count > MAX_TCP_CLIENTS {
-                println!("Recognizing the existence of the requested file.");
+                info!("Recognizing the existence of the requested file.");
                 let mut response = String::from(GET_ACK_header());
                 response.push_str(&crate::TCP_PORT.to_string());
                 response.push('\n');
                 response.push_str(&file_name);
-                println!("The proper response is: {}", response);
+                info!("The proper response is: {}", response);
                 let socket_rwlock = socket_arc.write().unwrap();
                 let socket = &*socket_rwlock;
                 let _ = match send_bytes_to_socket(
@@ -192,16 +190,16 @@ pub fn get_server(
                     Err(_) => continue,
                 };
                 drop(socket_rwlock);
-                println!("No problem sending data over UDP Socket.");
+                info!("No problem sending data over UDP Socket.");
                 current_node.prior_communications += 1;
                 let mut nodes_ptr = match nodes_rwlock.write() {
                     Ok(ptr) => ptr,
                     Err(e) => {
-                        println!("{}", e);
+                        info!("{}", e);
                         continue;
                     }
                 };
-                println!("No problem Unlocking the rwlock again");
+                info!("No problem Unlocking the rwlock again");
                 nodes_ptr.retain(|k| {
                     &generate_address(&k.ip.to_string(), k.port)
                         != &generate_address(&current_node.ip.to_string(), current_node.port)
@@ -210,22 +208,25 @@ pub fn get_server(
                 nodes_ptr.insert(current_node);
                 // Unlock the rwlock because it's not needed anymore, but it'll linger on for too long.
                 drop(nodes_ptr);
-                println!("Starting TCP Send server");
+                info!("Starting TCP Send server");
                 let ip_string = data_pair.1.ip().to_string();
                 let file_name_string = file_name.to_string();
                 std::thread::spawn(move || {
                     tcp::tcp_get_sender(ip_string, file_name_string, prior_node_comms)
                 });
             }
+            else {
+                info!("File not found, denying the GET request");
+            }
         }
         // Connect to a node that has ACK'd one of your previous requests.
         else {
             let mut tcp_socket_addr = data_pair.1.clone();
             let port_str = data_lines.next().unwrap();
-            println!("Port string is: {}", port_str);
+            info!("Port string is: {}", port_str);
             tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
             let file_name = data_lines.next().unwrap().to_string();
-            println!("Starting TCP Receive Server");
+            info!("Starting TCP Receive Server");
             std::thread::spawn(move || tcp::tcp_get_receiver(tcp_socket_addr.clone(), file_name));
         }
     }
@@ -241,36 +242,36 @@ pub fn get_client(
             Ok(data) => data,
             Err(_) => continue,
         };
-        println!("Received data");
+        info!("Received data");
         let mut commands = input.split(" ");
         let arg = commands.next().unwrap();
 
-        println!("{}", arg);
-        println!("{}", stdin_GET_header());
-        println!("{}", arg.starts_with(stdin_GET_header()));
+        info!("{}", arg);
+        info!("{}", stdin_GET_header());
+        info!("{}", arg.starts_with(stdin_GET_header()));
 
         if arg.starts_with("list") {
-            let value = nodes_arc.read().unwrap();
+            let value = &*nodes_arc.read().unwrap();
             println!("{:?}", value);
         } else if arg.starts_with(stdin_GET_header()) {
-            println!("Understand GET");
+            info!("Understand GET");
             // Make sure there is a file name!
             let file_name = match commands.next() {
                 Some(cmd) => cmd.trim(),
                 None => continue,
             };
-            println!("Waiting for socket acq.");
+            info!("Waiting for socket acq.");
             let socket_rwlock = socket_arc.write().unwrap();
             let socket = &*socket_rwlock;
-            println!("Waiting for nodes acq.");
+            info!("Waiting for nodes acq.");
             let nodes_ptr = nodes_arc.read().unwrap();
             let nodes = &*nodes_ptr;
-            println!("Preparing to broadcast GET");
+            info!("Preparing to broadcast GET");
             for node in nodes {
-                println!("GET sent to {}", node);
+                info!("GET sent to {}", node);
                 let mut request = String::from(GET_header());
                 request.push_str(file_name);
-                println!("The request is: {}", request);
+                info!("The request is: {}", request);
                 send_bytes_to_socket(request.as_bytes(), node, socket).unwrap_or(0);
             }
         }
@@ -285,7 +286,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let socket_rwlock = RwLock::new(socket);
     let socket_arc = Arc::new(socket_rwlock);
     let nodes_arc = Arc::new(nodes_rwlock);
-    println!("generated socket successfully!");
+    info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_tx, get_rx) = mpsc::channel::<(String, SocketAddr)>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))

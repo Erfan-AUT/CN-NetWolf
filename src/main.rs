@@ -1,5 +1,6 @@
-#[macro_use]
-extern crate lazy_static;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate log;
+extern crate simple_logger;
 mod dir;
 mod node;
 mod tcp;
@@ -47,9 +48,20 @@ fn main() -> std::io::Result<()> {
                 .takes_value(true)
                 .about("The directory whose files this node is going to share."),
         )
+        .arg(
+            Arg::with_name("verbose")
+            .short('v')
+            .long("verbose")
+            .takes_value(false)
+            .about("Enables the program to be run in verbose mode.")
+        )
         .get_matches();
     let init_nodes_dir = matches.value_of("list").unwrap_or("nodes.txt");
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
+    let is_verbose = matches.is_present("verbose");
+    if is_verbose {
+        simple_logger::init_with_level(log::Level::Info).unwrap();
+    }
     *STATIC_DIR.write().unwrap() = static_dir;
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
     let init_dir_string = init_nodes_dir.to_string();

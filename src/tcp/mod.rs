@@ -4,10 +4,11 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::{thread, time};
+use log::{info, warn};
 
 const CONGESTION_DELAY_MS: u64 = 500;
-// const MAX_PRIOR: u16 = 3;
 
+// To avoid over-writing already existing files.
 fn generate_file_address(file_name: &str, sr: bool) -> String {
     let ptr_string = &*STATIC_DIR.read().unwrap();
     let mut file_addr = String::from(ptr_string);
@@ -15,19 +16,19 @@ fn generate_file_address(file_name: &str, sr: bool) -> String {
     if sr {
         file_addr.push_str("-1.txt");
     }
-    println!("Destination for the incoming file is: {}", file_addr);
+    info!("Destination for the incoming file is: {}", file_addr);
     file_addr
 }
 
 pub fn tcp_get_receiver(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
-    println!("Trying to connect to socket: {}", addr);
+    info!("Trying to connect to socket: {}", addr);
     let stream = TcpStream::connect(addr)?;
     let mut tcp_input_stream = BufReader::new(stream);
     let file_addr = generate_file_address(&file_name, true);
-    println!("Trying to create the receiving file for writing");
+    info!("Trying to create the receiving file for writing");
     let f = File::create(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
-    println!("Starting to receive data from TCP socket");
+    info!("Starting to receive data from TCP socket");
     handle_both(&mut tcp_input_stream, &mut file_output_stream, 0)
 }
 
@@ -43,9 +44,9 @@ pub fn handle_both<T: Read, U: Write>(
         size = input.read(&mut buf)?;
         output.write(&buf[..size])?;
         thread::sleep(discovery_interval);
-        println!("Read and Wrote {} bytes from/to sockets", size);
+        info!("Read and Wrote {} bytes from/to sockets", size);
     }
-    println!("Finished reading and writing!");
+    info!("Finished reading and writing!");
     Ok(())
 }
 
@@ -80,23 +81,23 @@ pub fn tcp_get_sender(
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
     };
-    println!("Opened TCP Socket on: {}", tcp_addr);
+    info!("Opened TCP Socket on: {}", tcp_addr);
     // Unly handles one client but whatever. :))
     for strm in listener.incoming() {
         let stream = strm?;
         // Make sure you're responding to the right client!
         let stream_ip = stream.local_addr()?.ip().to_string();
-        println!("Stream IP is: {}", stream_ip);
-        println!("Incoming address was: {}", incoming_ip_str);
+        info!("Stream IP is: {}", stream_ip);
+        info!("Incoming address was: {}", incoming_ip_str);
         if stream_ip == incoming_ip_str {
-            println!("Accepted Client");
+            info!("Accepted Client");
             if prior_comms > 0 {
                 delay = CONGESTION_DELAY_MS;
             }
             handle_client(stream, &file_name, delay)?;
             break;
         }
-        println!("Refused Client");
+        warn!("Refused Client");
     }
     Ok(())
 }
