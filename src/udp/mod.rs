@@ -1,21 +1,17 @@
 use crate::{dir, node, tcp, BUF_SIZE, CURRENT_TCP_CLIENTS, MAX_TCP_CLIENTS};
+use log::info;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{mpsc, mpsc::Receiver, Arc, RwLock};
 use std::time::Duration;
 use std::{thread, time};
-use log::{info, warn};
+pub mod headers;
+mod reliable;
 
 const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
 const DISCOVERY_INTERVAL_MS: u64 = 1000;
-
-#[derive(PartialEq)]
-enum PacketType {
-    DISC,
-    GET,
-}
 
 fn generate_socket() -> UdpSocket {
     let mut current_server_port = UDP_SERVER_PORT;
@@ -57,7 +53,7 @@ fn receive_string_from_socket(
     let socket_arc = socket_arc.clone();
     let socket = &*socket_arc.read().unwrap();
     let mut buf = [0; BUF_SIZE];
-    //This is hyst a ridiculous trick to get over all of rust's size-checking.
+    //This is just a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
     let (amt, src) = match socket.recv_from(&mut buf) {
         Ok((amt, src)) => (amt, src),
@@ -68,13 +64,6 @@ fn receive_string_from_socket(
         Ok(string) => Ok((string.to_string(), src)),
         Err(_) => Err(err),
     }
-}
-
-fn discovery_or_get(input_string: &str) -> PacketType {
-    if input_string.starts_with(node::Node::header()) {
-        return PacketType::DISC;
-    }
-    PacketType::GET
 }
 
 pub fn discovery_server(
@@ -125,18 +114,6 @@ pub fn discovery_server(
     }
 }
 
-pub fn GET_ACK_header() -> &'static str {
-    "ACK\n"
-}
-
-pub fn GET_header() -> &'static str {
-    "GET\n"
-}
-
-pub fn stdin_GET_header() -> &'static str {
-    "get"
-}
-
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
     socket_arc: Arc<RwLock<UdpSocket>>,
@@ -165,7 +142,7 @@ pub fn get_server(
         drop(nodes_ptr);
         let mut data_lines = data.lines();
         // Send ACK to GET request
-        if data_lines.next().unwrap().starts_with(GET_header().trim()) {
+        if data_lines.next().unwrap().starts_with(headers::PacketHeader::get().trim()) {
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
             let client_count = *CURRENT_TCP_CLIENTS.read().unwrap();
@@ -174,7 +151,7 @@ pub fn get_server(
             // https://github.com/rust-lang/rust/issues/42671
             if dir::file_list().iter().any(|x| x == file_name) && client_count > MAX_TCP_CLIENTS {
                 info!("Recognizing the existence of the requested file.");
-                let mut response = String::from(GET_ACK_header());
+                let mut response = String::from(headers::PacketHeader::ack());
                 response.push_str(&crate::TCP_PORT.to_string());
                 response.push('\n');
                 response.push_str(&file_name);
@@ -214,8 +191,7 @@ pub fn get_server(
                 std::thread::spawn(move || {
                     tcp::tcp_get_sender(ip_string, file_name_string, prior_node_comms)
                 });
-            }
-            else {
+            } else {
                 info!("File not found, denying the GET request");
             }
         }
@@ -246,14 +222,10 @@ pub fn get_client(
         let mut commands = input.split(" ");
         let arg = commands.next().unwrap();
 
-        info!("{}", arg);
-        info!("{}", stdin_GET_header());
-        info!("{}", arg.starts_with(stdin_GET_header()));
-
-        if arg.starts_with("list") {
+        if arg.starts_with(headers::StdinHeader::list()) {
             let value = &*nodes_arc.read().unwrap();
             println!("{:?}", value);
-        } else if arg.starts_with(stdin_GET_header()) {
+        } else if arg.starts_with(headers::StdinHeader::get()) {
             info!("Understand GET");
             // Make sure there is a file name!
             let file_name = match commands.next() {
@@ -269,7 +241,7 @@ pub fn get_client(
             info!("Preparing to broadcast GET");
             for node in nodes {
                 info!("GET sent to {}", node);
-                let mut request = String::from(GET_header());
+                let mut request = String::from(headers::PacketHeader::get());
                 request.push_str(file_name);
                 info!("The request is: {}", request);
                 send_bytes_to_socket(request.as_bytes(), node, socket).unwrap_or(0);
@@ -313,12 +285,13 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
             Ok((string, addr)) => (string, addr),
             Err(_) => continue,
         };
-        if discovery_or_get(&data_addr_pair.0) == PacketType::DISC {
+        let header = headers::PacketHeader::packet_type(&data_addr_pair.0);
+        if header == headers::PacketHeader::Disc {
             match discovery_tx.send(data_addr_pair.0) {
                 Ok(_) => (),
                 Err(_) => (),
             };
-        } else {
+        } else if header == headers::PacketHeader::GET {
             match get_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),

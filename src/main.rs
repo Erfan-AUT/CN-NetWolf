@@ -1,3 +1,7 @@
+// This feature has not been stabilized yet. For more info refer to:
+// https://github.com/rust-lang/rust/issues/57563
+// #![feature(const_fn)]
+
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 extern crate simple_logger;

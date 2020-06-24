@@ -70,13 +70,22 @@ pub fn handle_client(stream: TcpStream, file_name: &str, delay: u64) -> std::io:
     result
 }
 
+//Method one: If the requesting node has requested something before, 
+pub fn delay_to_avoid_surfers(prior_comms: u16)  -> u64 {
+    if prior_comms > 0 {
+        return CONGESTION_DELAY_MS
+    }
+    else {
+        return 0
+    }
+}
+
 pub fn tcp_get_sender(
     incoming_ip_str: String,
     file_name: String,
     prior_comms: u16,
 ) -> std::io::Result<()> {
     let tcp_addr = generate_address(LOCALHOST, *crate::TCP_PORT);
-    let mut delay: u64 = 0;
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
@@ -91,10 +100,7 @@ pub fn tcp_get_sender(
         info!("Incoming address was: {}", incoming_ip_str);
         if stream_ip == incoming_ip_str {
             info!("Accepted Client");
-            if prior_comms > 0 {
-                delay = CONGESTION_DELAY_MS;
-            }
-            handle_client(stream, &file_name, delay)?;
+            handle_client(stream, &file_name, delay_to_avoid_surfers(prior_comms))?;
             break;
         }
         warn!("Refused Client");

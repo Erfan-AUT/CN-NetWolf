@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::{fmt, fs};
+use crate::udp::headers::PacketHeader;
 // Make sure to read from an LF file!
 
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
@@ -40,7 +41,7 @@ impl Node {
     }
 
     pub fn nodes_to_string(nodes: &HashSet<Node>) -> String {
-        let mut nodes_string = String::from(Node::header());
+        let mut nodes_string = String::from(PacketHeader::discovery());
         for node in nodes {
             let a = node.to_string();
             nodes_string.push_str(&a);
@@ -91,9 +92,7 @@ impl Node {
         Node::new("Sneaky", node_strs[0], node_strs[1].parse::<u16>().unwrap())
     }
 
-    pub fn header() -> &'static str {
-        "DISC\n"
-    }
+    
 }
 
 fn str_to_u8_vector(ip_str: &str) -> Vec<u8> {
