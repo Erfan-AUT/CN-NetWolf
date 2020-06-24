@@ -1,5 +1,5 @@
 use crate::udp::generate_address;
-use crate::{BUF_SIZE, CURRENT_TCP_CLIENTS, LOCALHOST, STATIC_DIR};
+use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -51,7 +51,7 @@ pub fn handle_both<T: Read, U: Write>(
 }
 
 fn update_client_number(increment: bool) {
-    let mut current_clients_ptr = CURRENT_TCP_CLIENTS.write().unwrap();
+    let mut current_clients_ptr = CURRENT_DATA_CLIENTS.write().unwrap();
     if increment {
         *current_clients_ptr += 1;
     } else {
@@ -85,7 +85,7 @@ pub fn tcp_get_sender(
     file_name: String,
     prior_comms: u16,
 ) -> std::io::Result<()> {
-    let tcp_addr = generate_address(LOCALHOST, *crate::TCP_PORT);
+    let tcp_addr = generate_address(LOCALHOST, *crate::DATA_PORT);
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),

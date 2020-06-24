@@ -1,4 +1,4 @@
-use crate::{dir, node, tcp, BUF_SIZE, CURRENT_TCP_CLIENTS, MAX_TCP_CLIENTS};
+use crate::{dir, node, tcp, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
 use log::info;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
@@ -149,14 +149,14 @@ pub fn get_server(
         {
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
-            let client_count = *CURRENT_TCP_CLIENTS.read().unwrap();
+            let client_count = *CURRENT_DATA_CLIENTS.read().unwrap();
             // Don't respond if you don't have the file!
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
-            if dir::file_list().iter().any(|x| x == file_name) && MAX_TCP_CLIENTS > client_count {
+            if dir::file_list().iter().any(|x| x == file_name) && MAX_DATA_CLIENTS > client_count {
                 info!("Recognizing the existence of the requested file.");
                 let mut response = String::from(headers::PacketHeader::ack());
-                response.push_str(&crate::TCP_PORT.to_string());
+                response.push_str(&crate::DATA_PORT.to_string());
                 response.push('\n');
                 response.push_str(&file_name);
                 info!("The proper response is: {}", response);

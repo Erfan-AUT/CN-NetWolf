@@ -19,15 +19,15 @@ pub const BUF_SIZE: usize = 8192;
 pub const PORT_MIN: u16 = 2000;
 pub const PORT_MAX: u16 = 5000;
 pub const LOCALHOST: &str = "127.0.0.1";
-pub const MAX_TCP_CLIENTS: u16 = 3;
+pub const MAX_DATA_CLIENTS: u16 = 3;
 
 lazy_static! {
-    static ref TCP_PORT: u16 = random_tcp_port();
+    static ref DATA_PORT: u16 = random_data_port();
     static ref STATIC_DIR: RwLock<String> = RwLock::new(String::new());
-    static ref CURRENT_TCP_CLIENTS: RwLock<u16> = RwLock::new(0);
+    static ref CURRENT_DATA_CLIENTS: RwLock<u16> = RwLock::new(0);
 }
 
-fn random_tcp_port() -> u16 {
+fn random_data_port() -> u16 {
     let mut r = rand::thread_rng();
     r.gen_range(PORT_MIN, PORT_MAX)
 }
@@ -70,8 +70,8 @@ fn main() -> std::io::Result<()> {
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
     let init_dir_string = init_nodes_dir.to_string();
     std::thread::spawn(move || udp::udp_server(init_dir_string, stdin_rx));
-    let mut input = String::new();
     loop {
+        let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         if input != "quit" {
             stdin_tx.send(input.clone()).unwrap();
