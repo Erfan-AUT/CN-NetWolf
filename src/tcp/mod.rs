@@ -1,23 +1,33 @@
 use crate::udp::generate_address;
 use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
+use log::{info, warn};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::{thread, time};
-use log::{info, warn};
 
 const CONGESTION_DELAY_MS: u64 = 500;
 
 // To avoid over-writing already existing files.
-fn generate_file_address(file_name: &str, sr: bool) -> String {
-    let ptr_string = &*STATIC_DIR.read().unwrap();
-    let mut file_addr = String::from(ptr_string);
-    file_addr.push_str(file_name);
+pub fn generate_file_address(file_name: &str, sr: bool) -> String {
+    let static_dir = &*STATIC_DIR.read().unwrap();
+    let buf_immut = PathBuf::new().join(static_dir).join(file_name);
+    let mut display_str = String::from(buf_immut.to_str().unwrap());
+    // This stupid duplication is the only way I could get away with
+    // cloning a Path. JESUS 'EFFIN CHRIST
     if sr {
-        file_addr.push_str("-1.txt");
+        let mut file_path_buf = PathBuf::new().join(static_dir).join(file_name);
+        let file_extension = buf_immut.extension().unwrap_or(OsStr::new(".txt"));
+        file_path_buf.set_extension("");
+        file_path_buf.push("-1");
+        file_path_buf.push(file_extension);
+        display_str = String::from(Path::new(&file_path_buf).to_str().unwrap());
     }
-    info!("Destination for the incoming file is: {}", file_addr);
-    file_addr
+    // let file_path = file_path_buf.as_path();
+    info!("Destination for the incoming file is: {}", &display_str);
+    display_str
 }
 
 pub fn tcp_get_receiver(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
@@ -70,13 +80,12 @@ pub fn handle_client(stream: TcpStream, file_name: &str, delay: u64) -> std::io:
     result
 }
 
-//Method one: If the requesting node has requested something before, 
-pub fn delay_to_avoid_surfers(prior_comms: u16)  -> u64 {
+//Method one: If the requesting node has requested something before,
+pub fn delay_to_avoid_surfers(prior_comms: u16) -> u64 {
     if prior_comms > 0 {
-        return CONGESTION_DELAY_MS
-    }
-    else {
-        return 0
+        return CONGESTION_DELAY_MS;
+    } else {
+        return 0;
     }
 }
 

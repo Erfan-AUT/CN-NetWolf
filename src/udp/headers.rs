@@ -3,7 +3,9 @@ pub enum PacketHeader {
     Disc,
     GET,
     GETACK,
-    StopWait,
+    StopWaitData,
+    StopWaitACK,
+    StopWaitNAK,
     GoBackN,
     SRepeat,
     Unrecognized,
@@ -11,6 +13,8 @@ pub enum PacketHeader {
 
 impl PacketHeader {
     // So apparently const functions work without even enabling the feature!
+    // These three have an \n in the front because they're going to be
+    // Parsed as strings, but the others should be treated as raw bytes.
     pub const fn discovery() -> &'static str {
         "DISC\n"
     }
@@ -20,8 +24,14 @@ impl PacketHeader {
     pub const fn get() -> &'static str {
         "GET\n"
     }
-    pub const fn stop_and_wait() -> &'static str {
-        "SAW\n"
+    pub const fn stop_and_wait_data() -> &'static str {
+        "SWD"
+    }
+    pub const fn stop_and_wait_ack() -> &'static str {
+        "SWA"
+    }
+    pub const fn stop_and_wait_nak() -> &'static str {
+        "SWN"
     }
     pub const fn go_back_n() -> &'static str {
         "GBN\n"
@@ -49,7 +59,7 @@ impl PacketHeader {
         }
     }
     pub fn transfer_packet_type() {
-        const STOP_AND_WAIT: &'static str = PacketHeader::stop_and_wait();
+        const STOP_AND_WAIT: &'static str = PacketHeader::stop_and_wait_data();
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
         const SELECTIVE_REPEAT: &'static str = PacketHeader::selective_repeat();
     }
