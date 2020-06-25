@@ -3,6 +3,8 @@ pub enum PacketHeader {
     Disc,
     GET,
     GETACK,
+    TCPReceiverExistence,
+    UDPReceiverExistence,
     StopWaitData,
     StopWaitACK,
     StopWaitNAK,
@@ -34,10 +36,13 @@ impl PacketHeader {
         "SWN"
     }
     pub const fn go_back_n() -> &'static str {
-        "GBN\n"
+        "GBN"
     }
     pub const fn selective_repeat() -> &'static str {
-        "SR\n"
+        "SR"
+    }
+    pub const fn tcp_get() -> &'static str {
+        "TCPGET"
     }
 
     pub fn packet_type(packet_str: &str) -> PacketHeader {
@@ -58,10 +63,20 @@ impl PacketHeader {
             PacketHeader::Unrecognized
         }
     }
-    pub fn transfer_packet_type() {
+
+    // Check each packet header for UDP, only the first packet for TCP.
+    pub fn udp_transfer_packet_type(packet_str: &str) {
         const STOP_AND_WAIT: &'static str = PacketHeader::stop_and_wait_data();
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
         const SELECTIVE_REPEAT: &'static str = PacketHeader::selective_repeat();
+    }
+
+    pub fn tcp_transfer_packet_type(packet_str: &str) -> PacketHeader {
+        if packet_str.starts_with(PacketHeader::tcp_get()) {
+            PacketHeader::TCPReceiverExistence
+        } else {
+            PacketHeader::Unrecognized
+        }
     }
 }
 

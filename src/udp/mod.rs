@@ -13,11 +13,10 @@ const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
 const DISCOVERY_INTERVAL_MS: u64 = 1000;
 
-fn generate_socket() -> UdpSocket {
-    let mut current_server_port = UDP_SERVER_PORT;
+pub fn bind_udp_socket(mut port: u16) -> UdpSocket {
     loop {
-        let udp_server_addr = generate_address(LOCALHOST, current_server_port);
-        let _try_socket = match UdpSocket::bind(udp_server_addr) {
+        let udp_server_addr = generate_address(LOCALHOST, port);
+        match UdpSocket::bind(udp_server_addr) {
             Ok(sckt) => {
                 let timeout: Duration = Duration::new(1, 0);
                 sckt.set_write_timeout(Some(timeout)).unwrap();
@@ -26,7 +25,8 @@ fn generate_socket() -> UdpSocket {
             }
             Err(_) => (),
         };
-        current_server_port += 1;
+        // Try another port if the previous port failed
+        port += 1;
     }
 }
 
@@ -37,7 +37,7 @@ pub fn generate_address(ip: &str, port: u16) -> String {
     addr
 }
 
-fn send_bytes_to_socket(
+fn send_bytes_to_udp_socket(
     data: &[u8],
     node: &node::Node,
     socket: &UdpSocket,
@@ -47,7 +47,7 @@ fn send_bytes_to_socket(
     socket.send_to(data, target_addr)
 }
 
-fn receive_string_from_socket(
+fn receive_string_from_udp_socket(
     socket_arc: Arc<RwLock<UdpSocket>>,
 ) -> Result<(String, SocketAddr), Error> {
     let socket_arc = socket_arc.clone();
@@ -103,7 +103,7 @@ pub fn discovery_server(
             let socket_rwlock = socket_arc.write().unwrap();
             let socket = &*socket_rwlock;
             for node in nodes {
-                let _ = match send_bytes_to_socket(node_strings.as_bytes(), node, socket) {
+                let _ = match send_bytes_to_udp_socket(node_strings.as_bytes(), node, socket) {
                     Ok(__) => __,
                     Err(_) => continue,
                 };
@@ -114,10 +114,55 @@ pub fn discovery_server(
     }
 }
 
+// Wanted to put this entire sneaky node shenanigan in an inline function,
+// But apparently rust's inline functions are just not really good:
+// https://github.com/rust-lang/rust/issues/14527
+pub fn node_of_packet(
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+    sneaky_arc: Arc<RwLock<u16>>,
+    addr: &str,
+) -> node::Node {
+    let sneaky_rw = sneaky_arc.clone();
+    let mut sneaky_count = sneaky_rw.write().unwrap();
+    *sneaky_count += 1;
+    let mut current_node = node::Node::new_sneaky(addr, *sneaky_rw.read().unwrap());
+    let nodes_rwlock = nodes_arc.clone();
+    let nodes_ptr = nodes_rwlock.read().unwrap();
+    for node in &*nodes_ptr {
+        if node.has_same_address(addr) {
+            *sneaky_count -= 1;
+            current_node = node.clone();
+            break;
+        }
+    }
+    current_node
+}
+
+pub fn update_nodes(mut current_node: node::Node, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
+    current_node.prior_communications += 1;
+    let nodes_rwlock = nodes_arc.clone();
+    let mut nodes_ptr = match nodes_rwlock.write() {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            info!("{}", e);
+            return Err(Error::new(ErrorKind::Other, "well whatever"));
+        }
+    };
+    info!("No problem re-adding the current node with an updated prior_comms");
+    nodes_ptr.retain(|k| {
+        &generate_address(&k.ip.to_string(), k.port)
+            != &generate_address(&current_node.ip.to_string(), current_node.port)
+    });
+    let prior_node_comms = current_node.prior_communications;
+    nodes_ptr.insert(current_node);
+    Ok(())
+}
+
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
     socket_arc: Arc<RwLock<UdpSocket>>,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+    sneaky_arc: Arc<RwLock<u16>>,
 ) {
     loop {
         let data_pair: (String, SocketAddr) = match receiver.recv() {
@@ -127,19 +172,8 @@ pub fn get_server(
         // If the node is unknown, insert it into our currently known nodes.
         let data = &data_pair.0;
         let addr = &(&data_pair.1).to_string();
-        // Wanted to put this entire sneaky node shenanigan in an inline function,
-        // But apparently rust's inline functions are just not really good:
-        // https://github.com/rust-lang/rust/issues/14527
-        let mut current_node = node::Node::short_single_from_string(addr);
-        let nodes_rwlock = nodes_arc.clone();
-        let nodes_ptr = nodes_rwlock.read().unwrap();
-        for node in &*nodes_ptr {
-            if node.is_sneaky_node(addr) {
-                current_node = node.clone();
-                break;
-            }
-        }
-        drop(nodes_ptr);
+        let current_node = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), addr);
+
         let mut data_lines = data.lines();
         // Send ACK to GET request
         if data_lines
@@ -158,11 +192,12 @@ pub fn get_server(
                 let mut response = String::from(headers::PacketHeader::ack());
                 response.push_str(&crate::DATA_PORT.to_string());
                 response.push('\n');
+                // Because the node might not remember what it requested! :))
                 response.push_str(&file_name);
                 info!("The proper response is: {}", response);
                 let socket_rwlock = socket_arc.write().unwrap();
                 let socket = &*socket_rwlock;
-                let _ = match send_bytes_to_socket(
+                let _ = match send_bytes_to_udp_socket(
                     response.to_string().as_bytes(),
                     &current_node,
                     socket,
@@ -172,28 +207,10 @@ pub fn get_server(
                 };
                 drop(socket_rwlock);
                 info!("No problem sending data over UDP Socket.");
-                current_node.prior_communications += 1;
-                let mut nodes_ptr = match nodes_rwlock.write() {
-                    Ok(ptr) => ptr,
-                    Err(e) => {
-                        info!("{}", e);
-                        continue;
-                    }
-                };
-                info!("No problem Unlocking the rwlock again");
-                nodes_ptr.retain(|k| {
-                    &generate_address(&k.ip.to_string(), k.port)
-                        != &generate_address(&current_node.ip.to_string(), current_node.port)
-                });
-                let prior_node_comms = current_node.prior_communications;
-                nodes_ptr.insert(current_node);
-                // Unlock the rwlock because it's not needed anymore, but it'll linger on for too long.
-                drop(nodes_ptr);
                 info!("Starting TCP Send server");
-                let ip_string = data_pair.1.ip().to_string();
                 let file_name_string = file_name.to_string();
                 std::thread::spawn(move || {
-                    tcp::tcp_get_sender(ip_string, file_name_string, prior_node_comms)
+                    // tcp::tcp_get_sender(data_pair.1, file_name_string)
                 });
             } else {
                 info!("File not found, denying the GET request");
@@ -248,20 +265,23 @@ pub fn get_client(
                 let mut request = String::from(headers::PacketHeader::get());
                 request.push_str(file_name);
                 info!("The request is: {}", request);
-                send_bytes_to_socket(request.as_bytes(), node, socket).unwrap_or(0);
+                send_bytes_to_udp_socket(request.as_bytes(), node, socket).unwrap_or(0);
             }
         }
     }
 }
 
-pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
+pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // The fact whether or not this actually gets updated is still a question. :)))
     let nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_rwlock = RwLock::new(nodes);
-    let socket = generate_socket();
+    let socket = bind_udp_socket(UDP_SERVER_PORT);
     let socket_rwlock = RwLock::new(socket);
     let socket_arc = Arc::new(socket_rwlock);
     let nodes_arc = Arc::new(nodes_rwlock);
+    let sneaky_count: u16 = 0;
+    let sneaky_rwlock = RwLock::new(sneaky_count);
+    let sneaky_arc = Arc::new(sneaky_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_server_tx, get_server_rx) = mpsc::channel::<(String, SocketAddr)>();
@@ -271,7 +291,14 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
     let socket_arc_get_clone = socket_arc.clone();
     let node_arc_get_clone = nodes_arc.clone();
-    thread::spawn(|| get_server(get_server_rx, socket_arc_get_clone, node_arc_get_clone));
+    thread::spawn(|| {
+        get_server(
+            get_server_rx,
+            socket_arc_get_clone,
+            node_arc_get_clone,
+            sneaky_arc,
+        )
+    });
     let socket_arc_get_client_clone = socket_arc.clone();
     let node_arc_get_client_clone = nodes_arc.clone();
     std::thread::spawn(|| {
@@ -285,7 +312,7 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let mut data_addr_pair: (String, SocketAddr);
     loop {
         // This function is the only one reading from the socket!
-        data_addr_pair = match receive_string_from_socket(socket_arc.clone()) {
+        data_addr_pair = match receive_string_from_udp_socket(socket_arc.clone()) {
             Ok((string, addr)) => (string, addr),
             Err(_) => continue,
         };
@@ -300,6 +327,8 @@ pub fn udp_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
                 Ok(_) => (),
                 Err(_) => (),
             }
+        } else {
+            info!("Packet was not recognized!");
         }
     }
 }

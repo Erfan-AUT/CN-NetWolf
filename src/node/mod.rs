@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, IpAddr};
 use std::{fmt, fs};
 use crate::udp::headers::PacketHeader;
 // Make sure to read from an LF file!
@@ -52,12 +52,16 @@ impl Node {
         nodes_string
     }
 
-    pub fn is_sneaky_node(&self, other_str: &str) -> bool {
+    pub fn has_same_address(&self, other_str: &str) -> bool {
         self.to_short_string() == other_str.to_string()
     }
 
     pub fn to_short_string(&self) -> String {
-        format!("{}:{}", self.ip, self.port)
+        Node::ip_port_string(IpAddr::V4(self.ip), self.port)
+    }
+
+    pub fn ip_port_string(ip: IpAddr, port: u16) -> String {
+        format!("{}:{}", ip, port)
     }
 
     pub fn multiple_from_string(data: String, trim: bool) -> HashSet<Node> {
@@ -87,9 +91,11 @@ impl Node {
         nodes.insert(node);
     }
 
-    pub fn short_single_from_string(line: &str) -> Node {
+    pub fn new_sneaky(line: &str, sneaky_count: u16) -> Node {
         let node_strs: Vec<&str> = line.split(":").collect();
-        Node::new("Sneaky", node_strs[0], node_strs[1].parse::<u16>().unwrap())
+        let mut name = String::from("Sneaky-");
+        name.push_str(&sneaky_count.to_string());
+        Node::new(&name, node_strs[0], node_strs[1].parse::<u16>().unwrap())
     }
 
     

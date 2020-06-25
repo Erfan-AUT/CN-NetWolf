@@ -25,6 +25,8 @@ lazy_static! {
     static ref DATA_PORT: u16 = random_data_port();
     static ref STATIC_DIR: RwLock<String> = RwLock::new(String::new());
     static ref CURRENT_DATA_CLIENTS: RwLock<u16> = RwLock::new(0);
+    // To make sure we're giving sneakers different names!
+    static ref SNEAKY_COUNT: RwLock<u16> = RwLock::new(0);
 }
 
 fn random_data_port() -> u16 {
@@ -69,7 +71,7 @@ fn main() -> std::io::Result<()> {
     *STATIC_DIR.write().unwrap() = static_dir;
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
     let init_dir_string = init_nodes_dir.to_string();
-    std::thread::spawn(move || udp::udp_server(init_dir_string, stdin_rx));
+    std::thread::spawn(move || udp::main_server(init_dir_string, stdin_rx));
     loop {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;

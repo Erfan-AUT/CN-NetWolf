@@ -1,11 +1,14 @@
-use crate::udp::generate_address;
+use crate::node;
+use crate::udp::{generate_address, headers::PacketHeader, node_of_packet};
 use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
 use log::{info, warn};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use std::{thread, time};
 
 const CONGESTION_DELAY_MS: u64 = 500;
@@ -72,6 +75,7 @@ fn update_client_number(increment: bool) {
 pub fn handle_client(stream: TcpStream, file_name: &str, delay: u64) -> std::io::Result<()> {
     let mut tcp_output_steam = BufWriter::new(stream);
     let file_addr = generate_file_address(file_name, false);
+    // let b = stream.local_addr();
     let f = File::open(file_addr)?;
     let mut file_input_stream = BufReader::new(f);
     update_client_number(true);
@@ -90,7 +94,7 @@ pub fn delay_to_avoid_surfers(prior_comms: u16) -> u64 {
 }
 
 pub fn tcp_get_sender(
-    incoming_ip_str: String,
+    incoming_addr: SocketAddr,
     file_name: String,
     prior_comms: u16,
 ) -> std::io::Result<()> {
@@ -99,6 +103,7 @@ pub fn tcp_get_sender(
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
     };
+    let incoming_ip_str = incoming_addr.ip().to_string();
     info!("Opened TCP Socket on: {}", tcp_addr);
     // Unly handles one client but whatever. :))
     for strm in listener.incoming() {
@@ -113,6 +118,39 @@ pub fn tcp_get_sender(
             break;
         }
         warn!("Refused Client");
+    }
+    Ok(())
+}
+
+pub fn new_handle_client(mut stream: TcpStream) -> std::io::Result<()> {
+    Ok(())
+}
+
+// First packet of every stream: Who you are and what you want (again)
+// Because all sending is done through this one TCP Listener.
+pub fn tcp_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>, sneaky_arc: Arc<RwLock<u16>>) -> std::io::Result<()> {
+    let tcp_addr = generate_address(LOCALHOST, *crate::DATA_PORT);
+    let listener = match TcpListener::bind(&tcp_addr) {
+        Ok(lsner) => lsner,
+        Err(_) => return Ok(()),
+    };
+    for strm in listener.incoming() {
+        let mut stream = strm?;
+        let mut tcp_get_packet = String::new();
+        stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
+        let mut packet_lines = tcp_get_packet.lines();
+        let tcp_get_header = packet_lines.next().unwrap_or("");
+        if PacketHeader::tcp_transfer_packet_type(tcp_get_header)
+            == PacketHeader::TCPReceiverExistence
+        {
+            let stream_ip = stream.peer_addr().unwrap().ip();
+            let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap();
+            let current_node = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), &node::Node::ip_port_string(stream_ip, udp_get_port));
+        } else {
+            // Malicious packets BTFO
+            drop(stream);
+        }
+        // new_handle_client(stream?);
     }
     Ok(())
 }
