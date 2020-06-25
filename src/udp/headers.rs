@@ -131,9 +131,10 @@ impl DataHeader {
 
     pub fn from_tcp_string(packet: String) -> DataHeader {
         let mut packet_lines = packet.lines();
+        let packet_type = packet_lines.next().unwrap();
+        let conn_type = PacketHeader::packet_type(&packet_type);
         let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap_or(0);
         let file_name = packet_lines.next().unwrap_or("").to_string();
-        let conn_type = PacketHeader::packet_type(&packet);
         DataHeader::new(conn_type, udp_get_port, file_name)
     }
 
