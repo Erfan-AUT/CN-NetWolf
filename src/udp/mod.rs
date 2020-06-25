@@ -121,42 +121,26 @@ pub fn node_of_packet(
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
     sneaky_arc: Arc<RwLock<u16>>,
     addr: &str,
-) -> node::Node {
+) -> (node::Node, bool) {
     let sneaky_rw = sneaky_arc.clone();
     let mut sneaky_count = sneaky_rw.write().unwrap();
     *sneaky_count += 1;
+    let mut was_sneaky = true;
     let mut current_node = node::Node::new_sneaky(addr, *sneaky_rw.read().unwrap());
     let nodes_rwlock = nodes_arc.clone();
     let nodes_ptr = nodes_rwlock.read().unwrap();
     for node in &*nodes_ptr {
         if node.has_same_address(addr) {
             *sneaky_count -= 1;
+            was_sneaky = false;
             current_node = node.clone();
             break;
         }
     }
-    current_node
+    (current_node, was_sneaky)
 }
 
-pub fn update_nodes(mut current_node: node::Node, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
-    current_node.prior_communications += 1;
-    let nodes_rwlock = nodes_arc.clone();
-    let mut nodes_ptr = match nodes_rwlock.write() {
-        Ok(ptr) => ptr,
-        Err(e) => {
-            info!("{}", e);
-            return Err(Error::new(ErrorKind::Other, "well whatever"));
-        }
-    };
-    info!("No problem re-adding the current node with an updated prior_comms");
-    nodes_ptr.retain(|k| {
-        &generate_address(&k.ip.to_string(), k.port)
-            != &generate_address(&current_node.ip.to_string(), current_node.port)
-    });
-    let prior_node_comms = current_node.prior_communications;
-    nodes_ptr.insert(current_node);
-    Ok(())
-}
+
 
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
@@ -172,7 +156,7 @@ pub fn get_server(
         // If the node is unknown, insert it into our currently known nodes.
         let data = &data_pair.0;
         let addr = &(&data_pair.1).to_string();
-        let current_node = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), addr);
+        let (current_node, _) = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), addr);
 
         let mut data_lines = data.lines();
         // Send ACK to GET request

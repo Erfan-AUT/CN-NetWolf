@@ -1,11 +1,13 @@
+use crate::dir::file_list;
 use crate::node;
 use crate::udp::{generate_address, headers::PacketHeader, node_of_packet};
-use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
+use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, MAX_DATA_CLIENTS, STATIC_DIR};
 use log::{info, warn};
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -33,6 +35,7 @@ pub fn generate_file_address(file_name: &str, sr: bool) -> String {
     display_str
 }
 
+// This function is not yet compliant with its corresponding TCP sender.
 pub fn tcp_get_receiver(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
     let stream = TcpStream::connect(addr)?;
@@ -72,9 +75,9 @@ fn update_client_number(increment: bool) {
     }
 }
 
-pub fn handle_client(stream: TcpStream, file_name: &str, delay: u64) -> std::io::Result<()> {
+pub fn handle_client(stream: TcpStream, file_name: String, delay: u64) -> std::io::Result<()> {
     let mut tcp_output_steam = BufWriter::new(stream);
-    let file_addr = generate_file_address(file_name, false);
+    let file_addr = generate_file_address(&file_name, false);
     // let b = stream.local_addr();
     let f = File::open(file_addr)?;
     let mut file_input_stream = BufReader::new(f);
@@ -93,64 +96,84 @@ pub fn delay_to_avoid_surfers(prior_comms: u16) -> u64 {
     }
 }
 
-pub fn tcp_get_sender(
-    incoming_addr: SocketAddr,
-    file_name: String,
-    prior_comms: u16,
+
+pub fn update_nodes(
+    mut current_node: node::Node,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+) -> std::io::Result<u16> {
+    current_node.prior_communications += 1;
+    let nodes_rwlock = nodes_arc.clone();
+    let mut nodes_ptr = match nodes_rwlock.write() {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            info!("{}", e);
+            return Err(Error::new(ErrorKind::Other, "well whatever"));
+        }
+    };
+    info!("No problem re-adding the current node with an updated prior_comms");
+    nodes_ptr.retain(|k| {
+        &generate_address(&k.ip.to_string(), k.port)
+            != &generate_address(&current_node.ip.to_string(), current_node.port)
+    });
+    let prior_node_comms = current_node.prior_communications;
+    nodes_ptr.insert(current_node);
+    Ok(prior_node_comms)
+}
+
+fn check_and_handle_clients(
+    mut stream: TcpStream,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+    sneaky_arc: Arc<RwLock<u16>>,
+) {
+    let mut tcp_get_packet = String::new();
+    stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
+    let mut packet_lines = tcp_get_packet.lines();
+    let tcp_get_header = packet_lines.next().unwrap_or("");
+    if PacketHeader::tcp_transfer_packet_type(tcp_get_header) == PacketHeader::TCPReceiverExistence
+    {
+        let stream_ip = stream.peer_addr().unwrap().ip();
+        let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap();
+        let stream_addr = node::Node::ip_port_string(stream_ip, udp_get_port);
+        let (current_node, was_sneaky) = node_of_packet(
+            nodes_arc.clone(),
+            sneaky_arc.clone(),
+            &stream_addr,
+        );
+        let prior_comms = match update_nodes(current_node, nodes_arc.clone()) {
+            Ok(comms) => comms,
+            Err(_) => return,
+        };
+        let file_name = packet_lines.next().unwrap().to_string();
+        // If old node, it's ok; if not, check again!
+        if !was_sneaky || file_list().iter().any(|x| x == &file_name) {
+            let mut _client_count = *CURRENT_DATA_CLIENTS.write().unwrap();
+            _client_count += 1;
+            info!("Accepted Client: {}", &stream_addr);
+            std::thread::spawn(move || {
+                handle_client(stream, file_name, delay_to_avoid_surfers(prior_comms))
+            });
+        }
+    } else {
+        // Malicious packets BTFO
+        warn!("Refused malicious Client");
+        drop(stream);
+    }
+}
+
+// First packet of every stream: Who you are and what you want (again)
+// Because all sending is done through this one TCP Listener.
+pub fn tcp_server(
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+    sneaky_arc: Arc<RwLock<u16>>,
 ) -> std::io::Result<()> {
     let tcp_addr = generate_address(LOCALHOST, *crate::DATA_PORT);
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),
     };
-    let incoming_ip_str = incoming_addr.ip().to_string();
     info!("Opened TCP Socket on: {}", tcp_addr);
-    // Unly handles one client but whatever. :))
-    for strm in listener.incoming() {
-        let stream = strm?;
-        // Make sure you're responding to the right client!
-        let stream_ip = stream.local_addr()?.ip().to_string();
-        info!("Stream IP is: {}", stream_ip);
-        info!("Incoming address was: {}", incoming_ip_str);
-        if stream_ip == incoming_ip_str {
-            info!("Accepted Client");
-            handle_client(stream, &file_name, delay_to_avoid_surfers(prior_comms))?;
-            break;
-        }
-        warn!("Refused Client");
-    }
-    Ok(())
-}
-
-pub fn new_handle_client(mut stream: TcpStream) -> std::io::Result<()> {
-    Ok(())
-}
-
-// First packet of every stream: Who you are and what you want (again)
-// Because all sending is done through this one TCP Listener.
-pub fn tcp_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>, sneaky_arc: Arc<RwLock<u16>>) -> std::io::Result<()> {
-    let tcp_addr = generate_address(LOCALHOST, *crate::DATA_PORT);
-    let listener = match TcpListener::bind(&tcp_addr) {
-        Ok(lsner) => lsner,
-        Err(_) => return Ok(()),
-    };
-    for strm in listener.incoming() {
-        let mut stream = strm?;
-        let mut tcp_get_packet = String::new();
-        stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
-        let mut packet_lines = tcp_get_packet.lines();
-        let tcp_get_header = packet_lines.next().unwrap_or("");
-        if PacketHeader::tcp_transfer_packet_type(tcp_get_header)
-            == PacketHeader::TCPReceiverExistence
-        {
-            let stream_ip = stream.peer_addr().unwrap().ip();
-            let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap();
-            let current_node = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), &node::Node::ip_port_string(stream_ip, udp_get_port));
-        } else {
-            // Malicious packets BTFO
-            drop(stream);
-        }
-        // new_handle_client(stream?);
+    for stream in listener.incoming() {
+        check_and_handle_clients(stream?, nodes_arc.clone(), sneaky_arc.clone());
     }
     Ok(())
 }
