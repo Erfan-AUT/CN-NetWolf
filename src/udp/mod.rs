@@ -47,11 +47,7 @@ fn send_bytes_to_udp_socket(
     socket.send_to(data, target_addr)
 }
 
-fn receive_string_from_udp_socket(
-    socket_arc: Arc<RwLock<UdpSocket>>,
-) -> Result<(String, SocketAddr), Error> {
-    let socket_arc = socket_arc.clone();
-    let socket = &*socket_arc.read().unwrap();
+fn receive_string_from_udp_socket(socket: &UdpSocket) -> Result<(String, SocketAddr), Error> {
     let mut buf = [0; BUF_SIZE];
     //This is just a ridiculous trick to get over all of rust's size-checking.
     let err = Error::new(ErrorKind::Other, "OH NONONO");
@@ -68,17 +64,12 @@ fn receive_string_from_udp_socket(
 
 pub fn discovery_server(
     receiver: Receiver<String>,
-    socket_arc: Arc<RwLock<UdpSocket>>,
+    socket: UdpSocket,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
-    let local_address: String;
     let discovery_interval = time::Duration::from_millis(DISCOVERY_INTERVAL_MS);
     let nodes_rwlock = nodes_arc.clone();
-    {
-        let socket_rwlock = socket_arc.read().unwrap();
-        let socket = &*socket_rwlock;
-        local_address = socket.local_addr().unwrap().to_string();
-    }
+    let local_address = socket.local_addr().unwrap().to_string();
     loop {
         let mut received_nodes: HashSet<node::Node> = HashSet::new();
         // Read until there are no more incoming disccovery packets.
@@ -98,16 +89,11 @@ pub fn discovery_server(
         let nodes_ptr = nodes_rwlock.read().unwrap();
         let nodes = &*nodes_ptr;
         let node_strings = node::Node::nodes_to_string(nodes);
-        // Just to make sure the socket's lock get released in the end.
-        {
-            let socket_rwlock = socket_arc.write().unwrap();
-            let socket = &*socket_rwlock;
-            for node in nodes {
-                let _ = match send_bytes_to_udp_socket(node_strings.as_bytes(), node, socket) {
-                    Ok(__) => __,
-                    Err(_) => continue,
-                };
-            }
+        for node in nodes {
+            let _ = match send_bytes_to_udp_socket(node_strings.as_bytes(), node, &socket) {
+                Ok(__) => __,
+                Err(_) => continue,
+            };
         }
         drop(nodes_ptr);
         thread::sleep(discovery_interval);
@@ -138,7 +124,7 @@ pub fn node_of_packet(
 
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
-    socket_arc: Arc<RwLock<UdpSocket>>,
+    socket: UdpSocket,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
     loop {
@@ -174,17 +160,14 @@ pub fn get_server(
                 // Because the node might not remember what it requested! :))
                 response.push_str(&file_name);
                 info!("The proper response is: {}", response);
-                let socket_rwlock = socket_arc.write().unwrap();
-                let socket = &*socket_rwlock;
                 let _ = match send_bytes_to_udp_socket(
                     response.to_string().as_bytes(),
                     &current_node,
-                    socket,
+                    &socket,
                 ) {
                     Ok(__) => (),
                     Err(_) => continue,
                 };
-                drop(socket_rwlock);
                 info!("No problem sending GET/ACK over UDP Socket.");
             } else {
                 info!("File not found, denying the GET request");
@@ -203,7 +186,7 @@ pub fn get_server(
 
 pub fn get_client(
     receiver: Receiver<String>,
-    socket_arc: Arc<RwLock<UdpSocket>>,
+    socket: UdpSocket,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
 ) {
     loop {
@@ -226,8 +209,6 @@ pub fn get_client(
                 None => continue,
             };
             info!("Waiting for socket acq.");
-            let socket_rwlock = socket_arc.write().unwrap();
-            let socket = &*socket_rwlock;
             info!("Waiting for nodes acq.");
             let nodes_ptr = nodes_arc.read().unwrap();
             let nodes = &*nodes_ptr;
@@ -237,7 +218,7 @@ pub fn get_client(
                 let mut request = String::from(headers::PacketHeader::get());
                 request.push_str(file_name);
                 info!("The request is: {}", request);
-                send_bytes_to_udp_socket(request.as_bytes(), node, socket).unwrap_or(0);
+                send_bytes_to_udp_socket(request.as_bytes(), node, &socket).unwrap_or(0);
             }
         }
     }
@@ -248,35 +229,27 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_rwlock = RwLock::new(nodes);
     let socket = bind_udp_socket(UDP_SERVER_PORT);
-    let socket_rwlock = RwLock::new(socket);
-    let socket_arc = Arc::new(socket_rwlock);
     let nodes_arc = Arc::new(nodes_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_server_tx, get_server_rx) = mpsc::channel::<(String, SocketAddr)>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
-    let socket_arc_disc_clone = socket_arc.clone();
+    let socket_disc = socket.try_clone().unwrap();
     let node_arc_disc_clone = nodes_arc.clone();
-    thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
-    let socket_arc_get_server = socket_arc.clone();
+    thread::spawn(|| discovery_server(discovery_rx, socket_disc, node_arc_disc_clone));
+    let socket_get_server = socket.try_clone().unwrap();
     let nodes_arc_get_server = nodes_arc.clone();
-    thread::spawn(|| {
-        get_server(
-            get_server_rx,
-            socket_arc_get_server,
-            nodes_arc_get_server,
-        )
-    });
-    let socket_arc_get_client = socket_arc.clone();
+    thread::spawn(|| get_server(get_server_rx, socket_get_server, nodes_arc_get_server));
+    let socket_get_client = socket.try_clone().unwrap();
     let nodes_arc_get_client = nodes_arc.clone();
-    std::thread::spawn(|| get_client(stdin_rx, socket_arc_get_client, nodes_arc_get_client));
+    std::thread::spawn(|| get_client(stdin_rx, socket_get_client, nodes_arc_get_client));
     let nodes_arc_data_server = nodes_arc.clone();
     thread::spawn(|| tcp_server(nodes_arc_data_server));
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
         // This function is the only one reading from the socket!
-        data_addr_pair = match receive_string_from_udp_socket(socket_arc.clone()) {
+        data_addr_pair = match receive_string_from_udp_socket(&socket) {
             Ok((string, addr)) => (string, addr),
             Err(_) => continue,
         };
@@ -286,7 +259,7 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
                 Ok(_) => (),
                 Err(_) => (),
             };
-        } else if header == headers::PacketHeader::GETACK || header == headers::PacketHeader::GET { 
+        } else if header == headers::PacketHeader::GETACK || header == headers::PacketHeader::GET {
             match get_server_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),
