@@ -1,6 +1,10 @@
 use crate::dir::file_list;
 use crate::node;
-use crate::udp::{generate_address, headers::PacketHeader, node_of_packet, UDP_SERVER_PORT};
+use crate::udp::{
+    generate_address,
+    headers::{DataHeader, PacketHeader},
+    node_of_packet, UDP_SERVER_PORT,
+};
 use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
 use log::{info, warn};
 use std::collections::HashSet;
@@ -8,7 +12,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::io::{Error, ErrorKind};
-use std::net::{SocketAddr, TcpListener, TcpStream, Shutdown};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::{thread, time};
@@ -35,25 +39,24 @@ pub fn generate_file_address(file_name: &str, sr: bool) -> String {
         file_path_buf.set_extension(file_extension);
         display_str = String::from(Path::new(&file_path_buf).to_str().unwrap());
     }
-    // let file_path = file_path_buf.as_path(); 
+    // let file_path = file_path_buf.as_path();
     display_str
 }
 
 // This function is not yet compliant with its corresponding TCP sender.
 pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
+    let file_addr = generate_file_address(&file_name, true);
     let mut stream = TcpStream::connect(addr)?;
-    let mut request = String::from(PacketHeader::tcp_get());
-    request.push('\n');
-    request.push_str(&UDP_SERVER_PORT.to_string());
-    request.push('\n');
-    request.push_str(&file_name);
-    stream.write(request.as_bytes()).unwrap();
+    let request_header = DataHeader::new(
+        PacketHeader::TCPReceiverExistence,
+        UDP_SERVER_PORT,
+        file_name,
+    );
+    stream.write(request_header.to_tcp_string().as_bytes()).unwrap();
     stream.shutdown(Shutdown::Write).unwrap();
     let mut tcp_input_stream = BufReader::new(stream);
-    let file_addr = generate_file_address(&file_name, true);
     info!("Trying to create the receiving file for writing");
-    info!("The file name is {}", &file_name);
     let f = File::create(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
     info!("Starting to receive data from TCP socket");
@@ -134,26 +137,26 @@ pub fn update_nodes(
 fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) {
     let mut tcp_get_packet = String::new();
     stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
-    let mut packet_lines = tcp_get_packet.lines();
-    let tcp_get_header = packet_lines.next().unwrap_or("");
-    if PacketHeader::tcp_transfer_packet_type(tcp_get_header) == PacketHeader::TCPReceiverExistence
-    {
+    let data_header = DataHeader::from_tcp_string(tcp_get_packet);
+    if data_header.conn_type == PacketHeader::TCPReceiverExistence {
         let stream_ip = stream.peer_addr().unwrap().ip();
-        let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap();
-        let stream_addr = node::Node::ip_port_string(stream_ip, udp_get_port);
+        let stream_addr = node::Node::ip_port_string(stream_ip, data_header.udp_get_port);
         let (current_node, was_sneaky) = node_of_packet(nodes_arc.clone(), &stream_addr);
         let prior_comms = match update_nodes(current_node, nodes_arc.clone()) {
             Ok(comms) => comms,
             Err(_) => return,
         };
-        let file_name = packet_lines.next().unwrap().to_string();
         // If old node, it's ok; if not, check again!
-        if !was_sneaky || file_list().iter().any(|x| x == &file_name) {
+        if !was_sneaky || file_list().iter().any(|x| x == &data_header.file_name) {
             let mut _client_count = *CURRENT_DATA_CLIENTS.write().unwrap();
             _client_count += 1;
             info!("Accepted Client: {}", &stream_addr);
             std::thread::spawn(move || {
-                handle_client(stream, file_name, delay_to_avoid_surfers(prior_comms))
+                handle_client(
+                    stream,
+                    data_header.file_name,
+                    delay_to_avoid_surfers(prior_comms),
+                )
             });
         }
     } else {
