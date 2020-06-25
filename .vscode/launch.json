@@ -4,14 +4,56 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'p2p'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=p2p",
+                    "--package=p2p",
+                    "-- -v",
+                ],
+                "filter": {
+                    "name": "p2p",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'p2p'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=p2p",
+                    "--package=p2p"
+                ],
+                "filter": {
+                    "name": "p2p",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
         {
             "name": "Debug and Build",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/p2p.exe",
             "preLaunchTask": "Rust: cargo build - p2p",
-            "args": ["-l", "node.txt", "-d", "./istatic/"],
+            "args": [
+                "-l",
+                "node.txt",
+                "-d",
+                "./istatic/"
+            ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
@@ -22,7 +64,12 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/p2p.exe",
-            "args": ["-l", "node.txt", "-d", "./istatic/"],
+            "args": [
+                "-l",
+                "node.txt",
+                "-d",
+                "./istatic/"
+            ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],

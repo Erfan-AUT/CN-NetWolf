@@ -1,7 +1,9 @@
-use std::collections::HashSet;
-use std::net::{Ipv4Addr, IpAddr};
-use std::{fmt, fs};
 use crate::udp::headers::PacketHeader;
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
+use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr};
+use std::{fmt, fs};
 // Make sure to read from an LF file!
 
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
@@ -91,14 +93,13 @@ impl Node {
         nodes.insert(node);
     }
 
-    pub fn new_sneaky(line: &str, sneaky_count: u16) -> Node {
+    pub fn new_sneaky(line: &str) -> Node {
         let node_strs: Vec<&str> = line.split(":").collect();
         let mut name = String::from("Sneaky-");
-        name.push_str(&sneaky_count.to_string());
+        let rand_string: String = thread_rng().sample_iter(&Alphanumeric).take(8).collect();
+        name.push_str(&rand_string);
         Node::new(&name, node_strs[0], node_strs[1].parse::<u16>().unwrap())
     }
-
-    
 }
 
 fn str_to_u8_vector(ip_str: &str) -> Vec<u8> {

@@ -1,14 +1,14 @@
 use crate::dir::file_list;
 use crate::node;
-use crate::udp::{generate_address, headers::PacketHeader, node_of_packet};
-use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, MAX_DATA_CLIENTS, STATIC_DIR};
+use crate::udp::{generate_address, headers::PacketHeader, node_of_packet, UDP_SERVER_PORT};
+use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
 use log::{info, warn};
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::io::{Error, ErrorKind};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream, Shutdown};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::{thread, time};
@@ -26,22 +26,34 @@ pub fn generate_file_address(file_name: &str, sr: bool) -> String {
         let mut file_path_buf = PathBuf::new().join(static_dir).join(file_name);
         let file_extension = buf_immut.extension().unwrap_or(OsStr::new(".txt"));
         file_path_buf.set_extension("");
-        file_path_buf.push("-1");
-        file_path_buf.push(file_extension);
+        let file_name = file_path_buf.file_name().unwrap();
+        let mut lossy_string = file_name.to_string_lossy();
+        let b = lossy_string.to_mut();
+        b.push_str("-1");
+        let file_path_buf = PathBuf::new().join(static_dir);
+        let mut file_path_buf = file_path_buf.join(b);
+        file_path_buf.set_extension(file_extension);
         display_str = String::from(Path::new(&file_path_buf).to_str().unwrap());
     }
-    // let file_path = file_path_buf.as_path();
-    info!("Destination for the incoming file is: {}", &display_str);
+    // let file_path = file_path_buf.as_path(); 
     display_str
 }
 
 // This function is not yet compliant with its corresponding TCP sender.
 pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
-    let stream = TcpStream::connect(addr)?;
+    let mut stream = TcpStream::connect(addr)?;
+    let mut request = String::from(PacketHeader::tcp_get());
+    request.push('\n');
+    request.push_str(&UDP_SERVER_PORT.to_string());
+    request.push('\n');
+    request.push_str(&file_name);
+    stream.write(request.as_bytes()).unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
     let mut tcp_input_stream = BufReader::new(stream);
     let file_addr = generate_file_address(&file_name, true);
     info!("Trying to create the receiving file for writing");
+    info!("The file name is {}", &file_name);
     let f = File::create(file_addr)?;
     let mut file_output_stream = BufWriter::new(f);
     info!("Starting to receive data from TCP socket");
@@ -96,7 +108,6 @@ pub fn delay_to_avoid_surfers(prior_comms: u16) -> u64 {
     }
 }
 
-
 pub fn update_nodes(
     mut current_node: node::Node,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
@@ -120,11 +131,7 @@ pub fn update_nodes(
     Ok(prior_node_comms)
 }
 
-fn check_and_handle_clients(
-    mut stream: TcpStream,
-    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
-    sneaky_arc: Arc<RwLock<u16>>,
-) {
+fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) {
     let mut tcp_get_packet = String::new();
     stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
     let mut packet_lines = tcp_get_packet.lines();
@@ -134,11 +141,7 @@ fn check_and_handle_clients(
         let stream_ip = stream.peer_addr().unwrap().ip();
         let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap();
         let stream_addr = node::Node::ip_port_string(stream_ip, udp_get_port);
-        let (current_node, was_sneaky) = node_of_packet(
-            nodes_arc.clone(),
-            sneaky_arc.clone(),
-            &stream_addr,
-        );
+        let (current_node, was_sneaky) = node_of_packet(nodes_arc.clone(), &stream_addr);
         let prior_comms = match update_nodes(current_node, nodes_arc.clone()) {
             Ok(comms) => comms,
             Err(_) => return,
@@ -162,10 +165,7 @@ fn check_and_handle_clients(
 
 // First packet of every stream: Who you are and what you want (again)
 // Because all sending is done through this one TCP Listener.
-pub fn tcp_server(
-    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
-    sneaky_arc: Arc<RwLock<u16>>,
-) -> std::io::Result<()> {
+pub fn tcp_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
     let tcp_addr = generate_address(LOCALHOST, *crate::DATA_PORT);
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
@@ -173,7 +173,7 @@ pub fn tcp_server(
     };
     info!("Opened TCP Socket on: {}", tcp_addr);
     for stream in listener.incoming() {
-        check_and_handle_clients(stream?, nodes_arc.clone(), sneaky_arc.clone());
+        check_and_handle_clients(stream?, nodes_arc.clone());
     }
     Ok(())
 }

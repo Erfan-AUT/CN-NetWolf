@@ -9,8 +9,7 @@ use std::time::Duration;
 use std::{thread, time};
 pub mod headers;
 mod reliable;
-
-const UDP_SERVER_PORT: u16 = 3222;
+pub const UDP_SERVER_PORT: u16 = 3222;
 const LOCALHOST: &str = "127.0.0.1";
 const DISCOVERY_INTERVAL_MS: u64 = 1000;
 
@@ -120,19 +119,15 @@ pub fn discovery_server(
 // https://github.com/rust-lang/rust/issues/14527
 pub fn node_of_packet(
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
-    sneaky_arc: Arc<RwLock<u16>>,
     addr: &str,
 ) -> (node::Node, bool) {
-    let sneaky_rw = sneaky_arc.clone();
-    let mut sneaky_count = sneaky_rw.write().unwrap();
-    *sneaky_count += 1;
     let mut was_sneaky = true;
-    let mut current_node = node::Node::new_sneaky(addr, *sneaky_rw.read().unwrap());
+    let mut current_node = node::Node::new_sneaky(addr);
     let nodes_rwlock = nodes_arc.clone();
     let nodes_ptr = nodes_rwlock.read().unwrap();
+    info!("Trying to unlock nodes rw");
     for node in &*nodes_ptr {
         if node.has_same_address(addr) {
-            *sneaky_count -= 1;
             was_sneaky = false;
             current_node = node.clone();
             break;
@@ -145,7 +140,6 @@ pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
     socket_arc: Arc<RwLock<UdpSocket>>,
     nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
-    sneaky_arc: Arc<RwLock<u16>>,
 ) {
     loop {
         let data_pair: (String, SocketAddr) = match receiver.recv() {
@@ -155,8 +149,9 @@ pub fn get_server(
         // If the node is unknown, insert it into our currently known nodes.
         let data = &data_pair.0;
         let addr = &(&data_pair.1).to_string();
-        let (current_node, _) = node_of_packet(nodes_arc.clone(), sneaky_arc.clone(), addr);
-
+        info!("Received {} from {}", data, addr);
+        let (current_node, _) = node_of_packet(nodes_arc.clone(), addr);
+        info!("Recognized node's packet.");
         let mut data_lines = data.lines();
         // Send ACK to GET request
         if data_lines
@@ -167,6 +162,7 @@ pub fn get_server(
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
             let client_count = *CURRENT_DATA_CLIENTS.read().unwrap();
+            info!("All is fine this far.");
             // Don't respond if you don't have the file ot the TCP Server is swamped with too many clients.
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
@@ -198,10 +194,8 @@ pub fn get_server(
         else {
             let mut tcp_socket_addr = data_pair.1.clone();
             let port_str = data_lines.next().unwrap();
-            info!("Port string is: {}", port_str);
             tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
             let file_name = data_lines.next().unwrap().to_string();
-            info!("Starting TCP Receive Client");
             std::thread::spawn(move || tcp::tcp_client(tcp_socket_addr.clone(), file_name));
         }
     }
@@ -257,9 +251,6 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let socket_rwlock = RwLock::new(socket);
     let socket_arc = Arc::new(socket_rwlock);
     let nodes_arc = Arc::new(nodes_rwlock);
-    let sneaky_count: u16 = 0;
-    let sneaky_rwlock = RwLock::new(sneaky_count);
-    let sneaky_arc = Arc::new(sneaky_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_server_tx, get_server_rx) = mpsc::channel::<(String, SocketAddr)>();
@@ -269,21 +260,18 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
     let socket_arc_get_server = socket_arc.clone();
     let nodes_arc_get_server = nodes_arc.clone();
-    let sneaky_arc_get_server = sneaky_arc.clone();
     thread::spawn(|| {
         get_server(
             get_server_rx,
             socket_arc_get_server,
             nodes_arc_get_server,
-            sneaky_arc_get_server,
         )
     });
     let socket_arc_get_client = socket_arc.clone();
     let nodes_arc_get_client = nodes_arc.clone();
     std::thread::spawn(|| get_client(stdin_rx, socket_arc_get_client, nodes_arc_get_client));
     let nodes_arc_data_server = nodes_arc.clone();
-    let sneaky_arc_data_server = sneaky_arc.clone();
-    thread::spawn(|| tcp_server(nodes_arc_data_server, sneaky_arc_data_server));
+    thread::spawn(|| tcp_server(nodes_arc_data_server));
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {
@@ -298,7 +286,7 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
                 Ok(_) => (),
                 Err(_) => (),
             };
-        } else if header == headers::PacketHeader::GETACK {
+        } else if header == headers::PacketHeader::GETACK || header == headers::PacketHeader::GET { 
             match get_server_tx.send(data_addr_pair) {
                 Ok(_) => (),
                 Err(_) => (),
