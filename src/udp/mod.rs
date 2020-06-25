@@ -1,3 +1,4 @@
+use crate::tcp::tcp_server;
 use crate::{dir, node, tcp, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
 use log::info;
 use std::collections::HashSet;
@@ -140,8 +141,6 @@ pub fn node_of_packet(
     (current_node, was_sneaky)
 }
 
-
-
 pub fn get_server(
     receiver: Receiver<(String, SocketAddr)>,
     socket_arc: Arc<RwLock<UdpSocket>>,
@@ -168,7 +167,7 @@ pub fn get_server(
             // Becomes useless, so why should it keep the rwlock?
             let file_name = &data_lines.next().unwrap();
             let client_count = *CURRENT_DATA_CLIENTS.read().unwrap();
-            // Don't respond if you don't have the file!
+            // Don't respond if you don't have the file ot the TCP Server is swamped with too many clients.
             // For the reason why "contains" is not used, please refer to:
             // https://github.com/rust-lang/rust/issues/42671
             if dir::file_list().iter().any(|x| x == file_name) && MAX_DATA_CLIENTS > client_count {
@@ -190,12 +189,7 @@ pub fn get_server(
                     Err(_) => continue,
                 };
                 drop(socket_rwlock);
-                info!("No problem sending data over UDP Socket.");
-                info!("Starting TCP Send server");
-                let file_name_string = file_name.to_string();
-                std::thread::spawn(move || {
-                    // tcp::tcp_get_sender(data_pair.1, file_name_string)
-                });
+                info!("No problem sending GET/ACK over UDP Socket.");
             } else {
                 info!("File not found, denying the GET request");
             }
@@ -207,8 +201,8 @@ pub fn get_server(
             info!("Port string is: {}", port_str);
             tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
             let file_name = data_lines.next().unwrap().to_string();
-            info!("Starting TCP Receive Server");
-            std::thread::spawn(move || tcp::tcp_get_receiver(tcp_socket_addr.clone(), file_name));
+            info!("Starting TCP Receive Client");
+            std::thread::spawn(move || tcp::tcp_client(tcp_socket_addr.clone(), file_name));
         }
     }
 }
@@ -273,25 +267,23 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let socket_arc_disc_clone = socket_arc.clone();
     let node_arc_disc_clone = nodes_arc.clone();
     thread::spawn(|| discovery_server(discovery_rx, socket_arc_disc_clone, node_arc_disc_clone));
-    let socket_arc_get_clone = socket_arc.clone();
-    let node_arc_get_clone = nodes_arc.clone();
+    let socket_arc_get_server = socket_arc.clone();
+    let nodes_arc_get_server = nodes_arc.clone();
+    let sneaky_arc_get_server = sneaky_arc.clone();
     thread::spawn(|| {
         get_server(
             get_server_rx,
-            socket_arc_get_clone,
-            node_arc_get_clone,
-            sneaky_arc,
+            socket_arc_get_server,
+            nodes_arc_get_server,
+            sneaky_arc_get_server,
         )
     });
-    let socket_arc_get_client_clone = socket_arc.clone();
-    let node_arc_get_client_clone = nodes_arc.clone();
-    std::thread::spawn(|| {
-        get_client(
-            stdin_rx,
-            socket_arc_get_client_clone,
-            node_arc_get_client_clone,
-        )
-    });
+    let socket_arc_get_client = socket_arc.clone();
+    let nodes_arc_get_client = nodes_arc.clone();
+    std::thread::spawn(|| get_client(stdin_rx, socket_arc_get_client, nodes_arc_get_client));
+    let nodes_arc_data_server = nodes_arc.clone();
+    let sneaky_arc_data_server = sneaky_arc.clone();
+    thread::spawn(|| tcp_server(nodes_arc_data_server, sneaky_arc_data_server));
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {

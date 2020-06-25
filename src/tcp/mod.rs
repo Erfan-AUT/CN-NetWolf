@@ -36,7 +36,7 @@ pub fn generate_file_address(file_name: &str, sr: bool) -> String {
 }
 
 // This function is not yet compliant with its corresponding TCP sender.
-pub fn tcp_get_receiver(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
+pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
     let stream = TcpStream::connect(addr)?;
     let mut tcp_input_stream = BufReader::new(stream);
