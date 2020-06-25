@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem::size_of;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketHeader {
@@ -114,31 +115,31 @@ impl fmt::Display for PacketHeader {
     }
 }
 
-pub struct DataHeader {
+pub struct TCPHeader {
     pub conn_type: PacketHeader,
     pub udp_get_port: u16,
     pub file_name: String,
 }
 
-impl DataHeader {
-    pub fn new(conn_type: PacketHeader, udp_get_port: u16, file_name: String) -> DataHeader {
-        DataHeader {
+impl TCPHeader {
+    pub fn new(conn_type: PacketHeader, udp_get_port: u16, file_name: String) -> TCPHeader {
+        TCPHeader {
             conn_type,
             udp_get_port,
             file_name,
         }
     }
 
-    pub fn from_tcp_string(packet: String) -> DataHeader {
+    pub fn from_string(packet: String) -> TCPHeader {
         let mut packet_lines = packet.lines();
         let packet_type = packet_lines.next().unwrap();
         let conn_type = PacketHeader::packet_type(&packet_type);
         let udp_get_port = packet_lines.next().unwrap().parse::<u16>().unwrap_or(0);
         let file_name = packet_lines.next().unwrap_or("").to_string();
-        DataHeader::new(conn_type, udp_get_port, file_name)
+        TCPHeader::new(conn_type, udp_get_port, file_name)
     }
 
-    pub fn to_tcp_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         format!(
             "{}\n{}\n{}",
             self.conn_type, self.udp_get_port, self.file_name
@@ -157,5 +158,49 @@ impl StdinHeader {
     }
     pub fn list() -> &'static str {
         "list"
+    }
+}
+
+pub struct StopAndWaitHeader {
+    header_size: u16,
+    get_port: u16,
+    rdt_port: u16,
+    file_name: String,
+}
+
+impl StopAndWaitHeader {
+    pub fn new(
+        header_size: u16,
+        get_port: u16,
+        rdt_port: u16,
+        file_name: String,
+    ) -> StopAndWaitHeader {
+        StopAndWaitHeader {
+            header_size,
+            get_port,
+            rdt_port,
+            file_name,
+        }
+    }
+
+    fn u16_from_bytes(buf: &[u8]) -> u16 {
+        let byte_str = std::str::from_utf8(buf).unwrap();
+        byte_str.parse::<u16>().unwrap()
+    }
+
+    pub fn from_string(buf: &[u8]) -> StopAndWaitHeader {
+        let size = size_of::<u16>();
+        let header_size = StopAndWaitHeader::u16_from_bytes(&buf[..size]);
+        let header_usize: usize = header_size.into();
+        let get_port = StopAndWaitHeader::u16_from_bytes(&buf[size..size * 2]);
+        let rdt_port = StopAndWaitHeader::u16_from_bytes(&buf[size * 2..size * 3]);
+        let file_name = std::str::from_utf8(&buf[size * 3..header_usize])
+            .unwrap()
+            .to_string();
+        StopAndWaitHeader::new(header_size, get_port, rdt_port, file_name)
+    }
+
+    pub fn packet_size(file_name: String) -> usize {
+        size_of::<u16>() * 3 + file_name.as_bytes().len()
     }
 }

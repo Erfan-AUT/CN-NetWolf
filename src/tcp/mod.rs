@@ -2,7 +2,7 @@ use crate::dir::file_list;
 use crate::node;
 use crate::udp::{
     generate_address,
-    headers::{DataHeader, PacketHeader},
+    headers::{TCPHeader, PacketHeader},
     node_of_packet, UDP_SERVER_PORT,
 };
 use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
@@ -48,12 +48,12 @@ pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
     let file_addr = generate_file_address(&file_name, true);
     let mut stream = TcpStream::connect(addr)?;
-    let request_header = DataHeader::new(
+    let request_header = TCPHeader::new(
         PacketHeader::TCPReceiverExistence,
         UDP_SERVER_PORT,
         file_name,
     );
-    stream.write(request_header.to_tcp_string().as_bytes()).unwrap();
+    stream.write(request_header.to_string().as_bytes()).unwrap();
     stream.shutdown(Shutdown::Write).unwrap();
     let mut tcp_input_stream = BufReader::new(stream);
     info!("Trying to create the receiving file for writing");
@@ -137,7 +137,7 @@ pub fn update_nodes(
 fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) {
     let mut tcp_get_packet = String::new();
     stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
-    let data_header = DataHeader::from_tcp_string(tcp_get_packet);
+    let data_header = TCPHeader::from_string(tcp_get_packet);
     if data_header.conn_type == PacketHeader::TCPReceiverExistence {
         let stream_ip = stream.peer_addr().unwrap().ip();
         let stream_addr = node::Node::ip_port_string(stream_ip, data_header.udp_get_port);
