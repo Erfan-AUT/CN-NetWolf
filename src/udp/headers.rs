@@ -1,8 +1,9 @@
+use std::convert::TryInto;
 use std::fmt;
 use std::mem::size_of;
 use std::net::IpAddr;
 
-const RDT_HEADER_SIZE: u16 = 3;
+pub const RDT_HEADER_SIZE: u16 = 3;
 
 pub enum ConnectionType {
     TCP,
@@ -24,6 +25,7 @@ pub enum PacketHeader {
     GETACK,
     TCPGET,
     RDTGET,
+    RDTEND,
     StopWaitACK,
     StopWaitNAK,
     GoBackN,
@@ -52,8 +54,8 @@ impl PacketHeader {
     pub const fn rdt_get() -> &'static str {
         "RDT"
     }
-    pub const fn stop_and_wait_data() -> &'static str {
-        "SWD"
+    pub const fn rdt_end() -> &'static str {
+        "END"
     }
     pub const fn stop_and_wait_ack() -> &'static str {
         "SWA"
@@ -66,6 +68,11 @@ impl PacketHeader {
     }
     pub const fn selective_repeat() -> &'static str {
         "SER"
+    }
+
+    pub fn is_end(buf: &[u8]) -> bool {
+        let ans = std::str::from_utf8(buf).unwrap_or("");
+        ans.starts_with(PacketHeader::rdt_end())
     }
 
     // TODO: Check each packet header for UDP, only the first packet for TCP.
@@ -81,6 +88,7 @@ impl PacketHeader {
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
         const SELECTIVE_REPEAT: &'static str = PacketHeader::selective_repeat();
         const RDT: &'static str = PacketHeader::rdt_get();
+        const END: &'static str = PacketHeader::rdt_end();
         let header_str = packet_str.lines().next().unwrap_or("");
         let header = [header_str, "\n"].join("");
         if header.starts_with(DISCOVERY) {
@@ -91,6 +99,8 @@ impl PacketHeader {
             PacketHeader::GETACK
         } else if header.starts_with(TCP_GET) {
             PacketHeader::TCPGET
+        } else if header.starts_with(END) {
+            PacketHeader::RDTEND
         } else if header.starts_with(STOP_AND_WAIT_ACK) {
             PacketHeader::StopWaitACK
         } else if header.starts_with(STOP_AND_WAIT_NAK) {
@@ -128,6 +138,8 @@ impl fmt::Display for PacketHeader {
             display_str = PacketHeader::selective_repeat();
         } else if self == &PacketHeader::RDTGET {
             display_str = PacketHeader::rdt_get();
+        } else if self == &PacketHeader::RDTEND {
+            display_str = PacketHeader::rdt_end();
         } else {
             display_str = PacketHeader::discovery();
         }
@@ -208,20 +220,17 @@ impl StopAndWaitHeader {
         }
     }
 
-    fn u16_from_bytes(buf: &[u8]) -> u16 {
-        let byte_str = std::str::from_utf8(buf).unwrap();
-        byte_str.parse::<u16>().unwrap()
-    }
-
     pub fn from_bytes(buf: &[u8], ip: IpAddr) -> (StopAndWaitHeader, &[u8]) {
-        let header = PacketHeader::packet_type(
-            std::str::from_utf8(&buf[..RDT_HEADER_SIZE as usize]).unwrap_or(""),
-        );
+        let base = RDT_HEADER_SIZE as usize;
+        let header = PacketHeader::packet_type(std::str::from_utf8(&buf[..base]).unwrap_or(""));
         let size = size_of::<u16>();
-        let header_size = StopAndWaitHeader::u16_from_bytes(&buf[..size]) as usize;
-        let get_port = StopAndWaitHeader::u16_from_bytes(&buf[size..size * 2]);
-        let rdt_port = StopAndWaitHeader::u16_from_bytes(&buf[size * 2..size * 3]);
-        let file_name = std::str::from_utf8(&buf[size * 3..header_size])
+        let header_size_bytes: [u8; 2] = buf[base..base + size].try_into().unwrap();
+        let header_size = u16::from_ne_bytes(header_size_bytes) as usize;
+        let get_port_bytes: [u8; 2] = buf[base + size..base + size * 2].try_into().unwrap();
+        let get_port = u16::from_ne_bytes(get_port_bytes);
+        let rdt_port_bytes: [u8; 2] = buf[base + size * 2..base + size * 3].try_into().unwrap();
+        let rdt_port = u16::from_ne_bytes(rdt_port_bytes);
+        let file_name = std::str::from_utf8(&buf[base + size * 3..header_size])
             .unwrap()
             .to_string();
         (
@@ -244,13 +253,20 @@ impl StopAndWaitHeader {
         RDT_HEADER_SIZE + (size_of::<u16>() as u16) * 3 + file_name.as_bytes().len() as u16
     }
 
-    pub fn as_vec (&self) -> Vec<u8> {
+    pub fn as_vec(&self) -> Vec<u8> {
         let type_str = self.header_type.to_string();
         let type_bytes = type_str.as_bytes();
-        let size_bytes = self.header_size.to_le_bytes();
-        let get_port_bytes = self.get_port.to_le_bytes();
-        let rdt_port_bytes = self.rdt_port.to_le_bytes();
+        let size_bytes = self.header_size.to_ne_bytes();
+        let get_port_bytes = self.get_port.to_ne_bytes();
+        let rdt_port_bytes = self.rdt_port.to_ne_bytes();
         let file_name_bytes = self.file_name.as_bytes();
-        [type_bytes, &size_bytes, &get_port_bytes, &rdt_port_bytes, file_name_bytes].concat()
+        [
+            type_bytes,
+            &size_bytes,
+            &get_port_bytes,
+            &rdt_port_bytes,
+            file_name_bytes,
+        ]
+        .concat()
     }
 }
