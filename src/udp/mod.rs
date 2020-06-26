@@ -1,48 +1,24 @@
+use crate::networking::{
+    bind_udp_socket, ip_port_string, node_of_packet, DISCOVERY_INTERVAL_MS, UDP_SERVER_PORT,
+};
+use crate::networking::{self, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
 use crate::tcp::tcp_server;
-use crate::{dir, node, tcp, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
+use crate::{dir, node, tcp};
 use log::info;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{mpsc, mpsc::Receiver, Arc, RwLock};
-use std::time::Duration;
 use std::{thread, time};
 pub mod headers;
 mod reliable;
-pub const UDP_SERVER_PORT: u16 = 3222;
-const LOCALHOST: &str = "127.0.0.1";
-const DISCOVERY_INTERVAL_MS: u64 = 1000;
-
-pub fn bind_udp_socket(mut port: u16) -> UdpSocket {
-    loop {
-        let udp_server_addr = generate_address(LOCALHOST, port);
-        match UdpSocket::bind(udp_server_addr) {
-            Ok(sckt) => {
-                let timeout: Duration = Duration::new(1, 0);
-                sckt.set_write_timeout(Some(timeout)).unwrap();
-                sckt.set_read_timeout(Some(timeout)).unwrap();
-                return sckt;
-            }
-            Err(_) => (),
-        };
-        // Try another port if the previous port failed
-        port += 1;
-    }
-}
-
-pub fn generate_address(ip: &str, port: u16) -> String {
-    let mut addr = String::from(ip);
-    addr.push_str(":");
-    addr.push_str(&port.to_string());
-    addr
-}
 
 fn send_bytes_to_udp_socket(
     data: &[u8],
     node: &node::Node,
     socket: &UdpSocket,
 ) -> Result<usize, Error> {
-    let target_addr = generate_address(&node.ip.to_string(), node.port);
+    let target_addr = ip_port_string(node.ip, node.port);
     // Don't really care if it fails.
     socket.send_to(data, target_addr)
 }
@@ -80,7 +56,7 @@ pub fn discovery_server(
                 Err(_) => break,
             };
             let mut new_nodes = node::Node::multiple_from_string(data, true);
-            new_nodes.retain(|k| &generate_address(&k.ip.to_string(), k.port) != &local_address);
+            new_nodes.retain(|k| ip_port_string(k.ip, k.port) != local_address);
             received_nodes.extend(new_nodes);
         }
         let mut nodes_ptr = nodes_rwlock.write().unwrap();
@@ -98,28 +74,6 @@ pub fn discovery_server(
         drop(nodes_ptr);
         thread::sleep(discovery_interval);
     }
-}
-
-// Wanted to put this entire sneaky node shenanigan in an inline function,
-// But apparently rust's inline functions are just not really good:
-// https://github.com/rust-lang/rust/issues/14527
-pub fn node_of_packet(
-    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
-    addr: &str,
-) -> (node::Node, bool) {
-    let mut was_sneaky = true;
-    let mut current_node = node::Node::new_sneaky(addr);
-    let nodes_rwlock = nodes_arc.clone();
-    let nodes_ptr = nodes_rwlock.read().unwrap();
-    info!("Trying to unlock nodes rw");
-    for node in &*nodes_ptr {
-        if node.has_same_address(addr) {
-            was_sneaky = false;
-            current_node = node.clone();
-            break;
-        }
-    }
-    (current_node, was_sneaky)
 }
 
 pub fn get_server(
@@ -155,7 +109,7 @@ pub fn get_server(
             if dir::file_list().iter().any(|x| x == file_name) && MAX_DATA_CLIENTS > client_count {
                 info!("Recognizing the existence of the requested file.");
                 let mut response = String::from(headers::PacketHeader::ack());
-                response.push_str(&crate::DATA_PORT.to_string());
+                response.push_str(&networking::DATA_PORT.to_string());
                 response.push('\n');
                 // Because the node might not remember what it requested! :))
                 response.push_str(&file_name);

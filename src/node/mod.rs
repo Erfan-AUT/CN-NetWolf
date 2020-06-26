@@ -1,8 +1,9 @@
+use crate::networking;
 use crate::udp::headers::PacketHeader;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::{fmt, fs};
 // Make sure to read from an LF file!
 
@@ -59,11 +60,7 @@ impl Node {
     }
 
     pub fn to_short_string(&self) -> String {
-        Node::ip_port_string(IpAddr::V4(self.ip), self.port)
-    }
-
-    pub fn ip_port_string(ip: IpAddr, port: u16) -> String {
-        format!("{}:{}", ip, port)
+        networking::ip_port_string(self.ip, self.port)
     }
 
     pub fn multiple_from_string(data: String, trim: bool) -> HashSet<Node> {
