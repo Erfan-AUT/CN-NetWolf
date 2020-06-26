@@ -1,8 +1,9 @@
 use crate::networking::{
-    bind_udp_socket, ip_port_string, node_of_packet, DISCOVERY_INTERVAL_MS, UDP_GET_PORT,
+    self, bind_udp_socket, ip_port_string, node_of_packet, BUF_SIZE, CURRENT_DATA_CLIENTS,
+    DISCOVERY_INTERVAL_MS, MAX_DATA_CLIENTS, UDP_GET_PORT,
 };
-use crate::networking::{self, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
 use crate::tcp::tcp_server;
+use crate::DATA_CONN_TYPE;
 use crate::{dir, node, tcp};
 use log::info;
 use std::collections::HashSet;
@@ -129,11 +130,24 @@ pub fn get_server(
         }
         // Connect to a node that has ACK'd one of your previous requests.
         else {
-            let mut tcp_socket_addr = data_pair.1.clone();
+            let mut data_socket_addr = data_pair.1.clone();
             let port_str = data_lines.next().unwrap();
-            tcp_socket_addr.set_port(port_str.parse::<u16>().unwrap());
+            data_socket_addr.set_port(port_str.parse::<u16>().unwrap());
             let file_name = data_lines.next().unwrap().to_string();
-            std::thread::spawn(move || tcp::tcp_client(tcp_socket_addr.clone(), file_name));
+            match *DATA_CONN_TYPE.read().unwrap() {
+                headers::ConnectionType::TCP => {
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                }
+                headers::ConnectionType::SAndW => {
+                    thread::spawn(move || reliable::sw_client(data_socket_addr.clone(), file_name));
+                }
+                headers::ConnectionType::GoBackN => {
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                }
+                headers::ConnectionType::SRepeat => {
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                }
+            };
         }
     }
 }
@@ -198,7 +212,20 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let nodes_arc_get_client = nodes_arc.clone();
     std::thread::spawn(|| get_client(stdin_rx, socket_get_client, nodes_arc_get_client));
     let nodes_arc_data_server = nodes_arc.clone();
-    thread::spawn(|| tcp_server(nodes_arc_data_server));
+    match *DATA_CONN_TYPE.read().unwrap() {
+        headers::ConnectionType::TCP => {
+            thread::spawn(|| tcp_server(nodes_arc_data_server));
+        }
+        headers::ConnectionType::SAndW => {
+            thread::spawn(|| reliable::sw_server(nodes_arc_data_server));
+        }
+        headers::ConnectionType::GoBackN => {
+            thread::spawn(|| tcp_server(nodes_arc_data_server));
+        }
+        headers::ConnectionType::SRepeat => {
+            thread::spawn(|| tcp_server(nodes_arc_data_server));
+        }
+    };
     // Because https://github.com/rust-lang/rfcs/issues/372 is still in the works. :))
     let mut data_addr_pair: (String, SocketAddr);
     loop {

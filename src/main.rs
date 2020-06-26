@@ -13,12 +13,13 @@ mod tcp;
 mod udp;
 use clap::{App, Arg};
 mod networking;
-
 use std::sync::{mpsc, RwLock};
 use std::{env, io};
 
 lazy_static! {
     static ref STATIC_DIR: RwLock<String> = RwLock::new(String::new());
+    static ref DATA_CONN_TYPE: RwLock<udp::headers::ConnectionType> =
+        RwLock::new(udp::headers::ConnectionType::default());
 }
 
 fn main() -> std::io::Result<()> {
@@ -42,6 +43,13 @@ fn main() -> std::io::Result<()> {
                 .about("The directory whose files this node is going to share."),
         )
         .arg(
+            Arg::with_name("conntype")
+                .short('t')
+                .long("conn")
+                .takes_value(true)
+                .about("Pick one between tcp, sw, gbn, sr"),
+        )
+        .arg(
             Arg::with_name("verbose")
                 .short('v')
                 .long("verbose")
@@ -52,6 +60,14 @@ fn main() -> std::io::Result<()> {
     let init_nodes_dir = matches.value_of("list").unwrap_or("nodes.txt");
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
     let is_verbose = matches.is_present("verbose");
+    let connection_type = matches.value_of("conntype").unwrap_or_default();
+    *DATA_CONN_TYPE.write().unwrap() = match connection_type {
+        "tcp" => udp::headers::ConnectionType::TCP,
+        "sw" => udp::headers::ConnectionType::SAndW,
+        "gbn" => udp::headers::ConnectionType::GoBackN,
+        "sr" => udp::headers::ConnectionType::SRepeat,
+        &_ => udp::headers::ConnectionType::TCP
+    };
     if is_verbose {
         simple_logger::init_with_level(log::Level::Info).unwrap();
     }

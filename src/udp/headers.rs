@@ -4,6 +4,19 @@ use std::net::IpAddr;
 
 const RDT_HEADER_SIZE: u16 = 3;
 
+pub enum ConnectionType {
+    TCP,
+    SAndW,
+    GoBackN,
+    SRepeat,
+}
+
+impl Default for ConnectionType {
+    fn default() -> ConnectionType {
+        ConnectionType::TCP
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketHeader {
     Disc,
