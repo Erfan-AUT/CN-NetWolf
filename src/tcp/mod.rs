@@ -1,6 +1,6 @@
 use crate::dir::{file_list, generate_file_address};
 use crate::networking::{
-    check_clients, delay_to_avoid_surfers, ip_port_string, update_client_number, UDP_SERVER_PORT, LOCALHOST
+    check_clients, delay_to_avoid_surfers, ip_port_string, update_client_number, UDP_GET_PORT, LOCALHOST
 };
 use crate::node;
 use crate::udp::headers::{PacketHeader, TCPHeader};
@@ -18,7 +18,7 @@ pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
     let file_addr = generate_file_address(&file_name, true);
     let mut stream = TcpStream::connect(addr)?;
-    let request_header = TCPHeader::new(PacketHeader::TCPGET, UDP_SERVER_PORT, file_name);
+    let request_header = TCPHeader::new(PacketHeader::TCPGET, UDP_GET_PORT, file_name);
     stream.write(request_header.to_string().as_bytes()).unwrap();
     stream.shutdown(Shutdown::Write).unwrap();
     let mut tcp_input_stream = BufReader::new(stream);
@@ -92,7 +92,7 @@ fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet
 // First packet of every stream: Who you are and what you want (again)
 // Because all sending is done through this one TCP Listener.
 pub fn tcp_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
-    let tcp_addr = ip_port_string(LOCALHOST, *networking::DATA_PORT);
+    let tcp_addr = ip_port_string(LOCALHOST, *networking::DATA_SENDER_PORT);
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),

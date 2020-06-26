@@ -2,7 +2,7 @@ use std::fmt;
 use std::mem::size_of;
 use std::net::IpAddr;
 
-const RDT_HEADER_SIZE: usize = 3;
+const RDT_HEADER_SIZE: u16 = 3;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketHeader {
@@ -11,7 +11,6 @@ pub enum PacketHeader {
     GETACK,
     TCPGET,
     RDTGET,
-    StopWaitData,
     StopWaitACK,
     StopWaitNAK,
     GoBackN,
@@ -64,7 +63,6 @@ impl PacketHeader {
         const GET: &'static str = PacketHeader::get();
         const ACK: &'static str = PacketHeader::ack();
         const TCP_GET: &'static str = PacketHeader::tcp_get();
-        const STOP_AND_WAIT_DATA: &'static str = PacketHeader::stop_and_wait_data();
         const STOP_AND_WAIT_ACK: &'static str = PacketHeader::stop_and_wait_ack();
         const STOP_AND_WAIT_NAK: &'static str = PacketHeader::stop_and_wait_nak();
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
@@ -80,8 +78,6 @@ impl PacketHeader {
             PacketHeader::GETACK
         } else if header.starts_with(TCP_GET) {
             PacketHeader::TCPGET
-        } else if header.starts_with(STOP_AND_WAIT_DATA) {
-            PacketHeader::StopWaitData
         } else if header.starts_with(STOP_AND_WAIT_ACK) {
             PacketHeader::StopWaitACK
         } else if header.starts_with(STOP_AND_WAIT_NAK) {
@@ -109,8 +105,6 @@ impl fmt::Display for PacketHeader {
             display_str = PacketHeader::ack();
         } else if self == &PacketHeader::TCPGET {
             display_str = PacketHeader::tcp_get();
-        } else if self == &PacketHeader::StopWaitData {
-            display_str = PacketHeader::stop_and_wait_data();
         } else if self == &PacketHeader::StopWaitACK {
             display_str = PacketHeader::stop_and_wait_ack();
         } else if self == &PacketHeader::StopWaitNAK {
@@ -186,18 +180,17 @@ pub struct StopAndWaitHeader {
 impl StopAndWaitHeader {
     pub fn new(
         header_type: PacketHeader,
-        header_size: u16,
         get_port: u16,
         rdt_port: u16,
-        file_name: String,
+        file_name: &str,
         ip: IpAddr,
     ) -> StopAndWaitHeader {
         StopAndWaitHeader {
             header_type,
-            header_size,
+            header_size: StopAndWaitHeader::find_header_size(&file_name),
             get_port,
             rdt_port,
-            file_name,
+            file_name: String::from(file_name),
             ip,
         }
     }
@@ -208,23 +201,33 @@ impl StopAndWaitHeader {
     }
 
     pub fn from_bytes(buf: &[u8], ip: IpAddr) -> (StopAndWaitHeader, &[u8]) {
-        let header =
-            PacketHeader::packet_type(std::str::from_utf8(&buf[..RDT_HEADER_SIZE]).unwrap_or(""));
+        let header = PacketHeader::packet_type(
+            std::str::from_utf8(&buf[..RDT_HEADER_SIZE as usize]).unwrap_or(""),
+        );
         let size = size_of::<u16>();
-        let header_size = StopAndWaitHeader::u16_from_bytes(&buf[..size]);
-        let header_usize: usize = header_size.into();
+        let header_size = StopAndWaitHeader::u16_from_bytes(&buf[..size]) as usize;
         let get_port = StopAndWaitHeader::u16_from_bytes(&buf[size..size * 2]);
         let rdt_port = StopAndWaitHeader::u16_from_bytes(&buf[size * 2..size * 3]);
-        let file_name = std::str::from_utf8(&buf[size * 3..header_usize])
+        let file_name = std::str::from_utf8(&buf[size * 3..header_size])
             .unwrap()
             .to_string();
         (
-            StopAndWaitHeader::new(header, header_size, get_port, rdt_port, file_name, ip),
-            &buf[header_usize..],
+            StopAndWaitHeader::new(header, get_port, rdt_port, &file_name, ip),
+            &buf[header_size..],
         )
     }
 
-    pub fn packet_size(file_name: String) -> usize {
-        RDT_HEADER_SIZE + size_of::<u16>() * 3 + file_name.as_bytes().len()
+    pub fn as_string(&self) -> String {
+        let mut header_str = String::new();
+        header_str.push_str(&self.header_type.to_string());
+        header_str.push_str(&self.header_size.to_string());
+        header_str.push_str(&self.get_port.to_string());
+        header_str.push_str(&self.rdt_port.to_string());
+        header_str.push_str(&self.file_name);
+        header_str
+    }
+
+    pub fn find_header_size(file_name: &str) -> u16 {
+        RDT_HEADER_SIZE + (size_of::<u16>() as u16) * 3 + file_name.as_bytes().len() as u16
     }
 }

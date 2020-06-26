@@ -8,7 +8,7 @@ use std::time::Duration;
 
 pub const CONGESTION_DELAY_MS: u64 = 500;
 pub const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
-pub const UDP_SERVER_PORT: u16 = 3222;
+pub const UDP_GET_PORT: u16 = 3222;
 pub const DISCOVERY_INTERVAL_MS: u64 = 1000;
 pub const BUF_SIZE: usize = 8192;
 pub const MAX_DATA_CLIENTS: u16 = 3;
@@ -17,7 +17,8 @@ pub const PORT_MAX: u16 = 5000;
 
 lazy_static! {
     pub static ref CURRENT_DATA_CLIENTS: RwLock<u16> = RwLock::new(0);
-    pub static ref DATA_PORT: u16 = random_data_port();
+    pub static ref DATA_SENDER_PORT: u16 = random_data_port();
+    pub static ref DATA_RECEIVER_PORT: u16 = random_data_port();
 }
 
 fn random_data_port() -> u16 {

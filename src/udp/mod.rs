@@ -1,5 +1,5 @@
 use crate::networking::{
-    bind_udp_socket, ip_port_string, node_of_packet, DISCOVERY_INTERVAL_MS, UDP_SERVER_PORT,
+    bind_udp_socket, ip_port_string, node_of_packet, DISCOVERY_INTERVAL_MS, UDP_GET_PORT,
 };
 use crate::networking::{self, BUF_SIZE, CURRENT_DATA_CLIENTS, MAX_DATA_CLIENTS};
 use crate::tcp::tcp_server;
@@ -109,7 +109,7 @@ pub fn get_server(
             if dir::file_list().iter().any(|x| x == file_name) && MAX_DATA_CLIENTS > client_count {
                 info!("Recognizing the existence of the requested file.");
                 let mut response = String::from(headers::PacketHeader::ack());
-                response.push_str(&networking::DATA_PORT.to_string());
+                response.push_str(&networking::DATA_SENDER_PORT.to_string());
                 response.push('\n');
                 // Because the node might not remember what it requested! :))
                 response.push_str(&file_name);
@@ -182,7 +182,7 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // The fact whether or not this actually gets updated is still a question. :)))
     let nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_rwlock = RwLock::new(nodes);
-    let socket = bind_udp_socket(UDP_SERVER_PORT);
+    let socket = bind_udp_socket(UDP_GET_PORT);
     let nodes_arc = Arc::new(nodes_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
