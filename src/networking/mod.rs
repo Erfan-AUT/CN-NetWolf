@@ -103,14 +103,16 @@ pub fn update_client_number(increment: bool) {
     }
 }
 
-pub fn bind_udp_socket(mut port: u16) -> UdpSocket {
+pub fn bind_udp_socket(mut port: u16, with_timeout: bool) -> UdpSocket {
     loop {
         let udp_server_addr = ip_port_string(LOCALHOST, port);
         match UdpSocket::bind(udp_server_addr) {
             Ok(sckt) => {
                 let timeout: Duration = Duration::new(1, 0);
-                sckt.set_write_timeout(Some(timeout)).unwrap();
-                sckt.set_read_timeout(Some(timeout)).unwrap();
+                if with_timeout {
+                    sckt.set_write_timeout(Some(timeout)).unwrap();
+                    sckt.set_read_timeout(Some(timeout)).unwrap();
+                }
                 return sckt;
             }
             Err(_) => (),

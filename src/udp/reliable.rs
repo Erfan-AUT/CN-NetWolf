@@ -13,11 +13,12 @@ use std::io::{BufReader, BufWriter, Error, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use std::vec;
 use std::{thread, time};
 
 pub fn sw_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
-    let socket = bind_udp_socket(*networking::DATA_SENDER_PORT);
+    let socket = bind_udp_socket(*networking::DATA_SENDER_PORT, false);
     let mut nodes_channels: HashMap<String, Sender<(StopAndWaitHeader, Vec<u8>)>> = HashMap::new();
     let mut buf = [0; BUF_SIZE];
     loop {
@@ -108,9 +109,24 @@ pub fn sw_sender(
     }
 }
 
+pub fn three_headers(
+    get_port: u16,
+    rdt_port: u16,
+    file_name: &str,
+    ip: IpAddr,
+) -> (StopAndWaitHeader, StopAndWaitHeader, StopAndWaitHeader) {
+    let get_header =
+        StopAndWaitHeader::new(PacketHeader::RDTGET, get_port, rdt_port, file_name, ip);
+    let ack_header =
+        StopAndWaitHeader::new(PacketHeader::StopWaitACK, get_port, rdt_port, file_name, ip);
+    let nak_header =
+        StopAndWaitHeader::new(PacketHeader::StopWaitNAK, get_port, rdt_port, file_name, ip);
+    (get_header, ack_header, nak_header)
+}
+
 pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to S&W Data Socket: {}", sender_addr);
-    let file_addr = generate_file_address(&file_name, true);
+    let file_addr = generate_file_address(&file_name, false);
     let localhost = IpAddr::V4(LOCALHOST);
     let recv_addr = SocketAddr::new(localhost, *DATA_RECEIVER_PORT);
     let socket = UdpSocket::bind(recv_addr).unwrap();
@@ -118,38 +134,28 @@ pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<
     let mut file_output_stream = BufWriter::new(f);
     // Making the UDP connection "duplex".
     socket.connect(sender_addr).unwrap();
-    let get_header = StopAndWaitHeader::new(
-        PacketHeader::RDTGET,
-        UDP_GET_PORT,
-        *DATA_RECEIVER_PORT,
-        &file_name,
-        localhost,
-    );
-    let ack_header = StopAndWaitHeader::new(
-        PacketHeader::StopWaitACK,
-        UDP_GET_PORT,
-        *DATA_RECEIVER_PORT,
-        &file_name,
-        localhost,
-    );
-    let nak_header = StopAndWaitHeader::new(
-        PacketHeader::StopWaitNAK,
-        UDP_GET_PORT,
-        *DATA_RECEIVER_PORT,
-        &file_name,
-        localhost,
-    );
+    let timeout: Duration = Duration::new(3, 0);
+    socket.set_write_timeout(Some(timeout)).unwrap();
+    socket.set_read_timeout(Some(timeout)).unwrap();
+    let (get_header, ack_header, nak_header) =
+        three_headers(UDP_GET_PORT, *DATA_RECEIVER_PORT, &file_name, localhost);
     // Send data GET packet
     let failure_addr = SocketAddr::new(localhost, 0);
-    socket.send(get_header.as_string().as_bytes()).unwrap();
+    info!("The udp get packet is: {}", get_header.as_string());
+    info!("Packet size in bytes: {}", get_header.as_string().as_bytes().len());
+    let header_vec = get_header.as_vec();
+    socket.send(header_vec.as_slice()).unwrap();
     loop {
         let mut buf = [0; BUF_SIZE];
+        // No malicious packet can come through because we've connected it to one target!
         let (size, data_addr) = match socket.recv_from(&mut buf) {
             Ok((size, addr)) => (size, addr),
-            Err(_) => (0, failure_addr), 
+            Err(_) => (0, failure_addr),
         };
         if data_addr == sender_addr {
+            info!("Received new data from server!");
             if size > 0 {
+                info!("Sending ACK");
                 socket.send(ack_header.as_string().as_bytes()).unwrap();
                 let buf_clone = buf.clone();
                 file_output_stream.write(&buf_clone).unwrap();
@@ -157,9 +163,11 @@ pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<
                 // Reading is finished!
                 info!("Finished reading from socket.");
                 return Ok(());
-            } 
-        }
-        else {
+            }
+        } else {
+            info!("Sending NAK");
+            info!("Data addr is: {}", data_addr);
+            info!("Supposed addr is: {}", sender_addr);
             socket.send(nak_header.as_string().as_bytes()).unwrap();
         }
     }

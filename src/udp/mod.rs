@@ -136,16 +136,16 @@ pub fn get_server(
             let file_name = data_lines.next().unwrap().to_string();
             match *DATA_CONN_TYPE.read().unwrap() {
                 headers::ConnectionType::TCP => {
-                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr, file_name));
                 }
                 headers::ConnectionType::SAndW => {
-                    thread::spawn(move || reliable::sw_client(data_socket_addr.clone(), file_name));
+                    thread::spawn(move || reliable::sw_client(data_socket_addr, file_name));
                 }
                 headers::ConnectionType::GoBackN => {
-                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr, file_name));
                 }
                 headers::ConnectionType::SRepeat => {
-                    thread::spawn(move || tcp::tcp_client(data_socket_addr.clone(), file_name));
+                    thread::spawn(move || tcp::tcp_client(data_socket_addr, file_name));
                 }
             };
         }
@@ -196,7 +196,7 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     // The fact whether or not this actually gets updated is still a question. :)))
     let nodes = node::read_starting_nodes(&init_nodes_dir);
     let nodes_rwlock = RwLock::new(nodes);
-    let socket = bind_udp_socket(UDP_GET_PORT);
+    let socket = bind_udp_socket(UDP_GET_PORT, true);
     let nodes_arc = Arc::new(nodes_rwlock);
     info!("Generated UDP socket successfully!");
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();

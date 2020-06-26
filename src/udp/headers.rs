@@ -243,4 +243,14 @@ impl StopAndWaitHeader {
     pub fn find_header_size(file_name: &str) -> u16 {
         RDT_HEADER_SIZE + (size_of::<u16>() as u16) * 3 + file_name.as_bytes().len() as u16
     }
+
+    pub fn as_vec (&self) -> Vec<u8> {
+        let type_str = self.header_type.to_string();
+        let type_bytes = type_str.as_bytes();
+        let size_bytes = self.header_size.to_le_bytes();
+        let get_port_bytes = self.get_port.to_le_bytes();
+        let rdt_port_bytes = self.rdt_port.to_le_bytes();
+        let file_name_bytes = self.file_name.as_bytes();
+        [type_bytes, &size_bytes, &get_port_bytes, &rdt_port_bytes, file_name_bytes].concat()
+    }
 }
