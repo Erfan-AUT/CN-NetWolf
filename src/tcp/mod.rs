@@ -2,7 +2,7 @@ use crate::dir::file_list;
 use crate::node;
 use crate::udp::{
     generate_address,
-    headers::{TCPHeader, PacketHeader},
+    headers::{PacketHeader, TCPHeader},
     node_of_packet, UDP_SERVER_PORT,
 };
 use crate::{BUF_SIZE, CURRENT_DATA_CLIENTS, LOCALHOST, STATIC_DIR};
@@ -12,7 +12,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::io::{Error, ErrorKind};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::{thread, time};
@@ -48,11 +48,7 @@ pub fn tcp_client(addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to socket: {}", addr);
     let file_addr = generate_file_address(&file_name, true);
     let mut stream = TcpStream::connect(addr)?;
-    let request_header = TCPHeader::new(
-        PacketHeader::TCPReceiverExistence,
-        UDP_SERVER_PORT,
-        file_name,
-    );
+    let request_header = TCPHeader::new(PacketHeader::TCPGET, UDP_SERVER_PORT, file_name);
     stream.write(request_header.to_string().as_bytes()).unwrap();
     stream.shutdown(Shutdown::Write).unwrap();
     let mut tcp_input_stream = BufReader::new(stream);
@@ -70,18 +66,18 @@ pub fn handle_both<T: Read, U: Write>(
 ) -> std::io::Result<()> {
     let mut buf = [0; BUF_SIZE];
     let mut size: usize = 1;
-    let discovery_interval = time::Duration::from_millis(delay);
+    let anti_surfing_interval = time::Duration::from_millis(delay);
     while size > 0 {
         size = input.read(&mut buf)?;
         output.write(&buf[..size])?;
-        thread::sleep(discovery_interval);
+        thread::sleep(anti_surfing_interval);
         info!("Read and Wrote {} bytes from/to sockets", size);
     }
     info!("Finished reading and writing!");
     Ok(())
 }
 
-fn update_client_number(increment: bool) {
+pub fn update_client_number(increment: bool) {
     let mut current_clients_ptr = CURRENT_DATA_CLIENTS.write().unwrap();
     if increment {
         *current_clients_ptr += 1;
@@ -134,23 +130,30 @@ pub fn update_nodes(
     Ok(prior_node_comms)
 }
 
+pub fn check_clients(
+    ip: &str,
+    port: u16,
+    nodes_arc: Arc<RwLock<HashSet<node::Node>>>,
+) -> (bool, u16) {
+    let stream_addr = generate_address(ip, port);
+    info!("Accepted Client: {}", &stream_addr);
+    let (current_node, was_sneaky) = node_of_packet(nodes_arc.clone(), &stream_addr);
+    let prior_comms = update_nodes(current_node, nodes_arc.clone()).unwrap();
+    (was_sneaky, prior_comms)
+}
+
 fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet<node::Node>>>) {
     let mut tcp_get_packet = String::new();
     stream.read_to_string(&mut tcp_get_packet).unwrap_or(0);
     let data_header = TCPHeader::from_string(tcp_get_packet);
-    if data_header.conn_type == PacketHeader::TCPReceiverExistence {
-        let stream_ip = stream.peer_addr().unwrap().ip();
-        let stream_addr = node::Node::ip_port_string(stream_ip, data_header.udp_get_port);
-        let (current_node, was_sneaky) = node_of_packet(nodes_arc.clone(), &stream_addr);
-        let prior_comms = match update_nodes(current_node, nodes_arc.clone()) {
-            Ok(comms) => comms,
-            Err(_) => return,
-        };
+    if data_header.conn_type == PacketHeader::TCPGET {
         // If old node, it's ok; if not, check again!
+        let (was_sneaky, prior_comms) = check_clients(
+            &stream.peer_addr().unwrap().ip().to_string(),
+            data_header.udp_get_port,
+            nodes_arc,
+        );
         if !was_sneaky || file_list().iter().any(|x| x == &data_header.file_name) {
-            let mut _client_count = *CURRENT_DATA_CLIENTS.write().unwrap();
-            _client_count += 1;
-            info!("Accepted Client: {}", &stream_addr);
             std::thread::spawn(move || {
                 handle_client(
                     stream,

@@ -1,13 +1,16 @@
 use std::fmt;
 use std::mem::size_of;
+use std::net::IpAddr;
+
+const RDT_HEADER_SIZE: usize = 3;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketHeader {
     Disc,
     GET,
     GETACK,
-    TCPReceiverExistence,
-    UDPReceiverExistence,
+    TCPGET,
+    RDTGET,
     StopWaitData,
     StopWaitACK,
     StopWaitNAK,
@@ -29,6 +32,14 @@ impl PacketHeader {
     pub const fn get() -> &'static str {
         "GET\n"
     }
+    pub const fn tcp_get() -> &'static str {
+        "TCPGET"
+    }
+
+    // All of the following should be of size 3.
+    pub const fn rdt_get() -> &'static str {
+        "RDT"
+    }
     pub const fn stop_and_wait_data() -> &'static str {
         "SWD"
     }
@@ -42,10 +53,7 @@ impl PacketHeader {
         "GBN"
     }
     pub const fn selective_repeat() -> &'static str {
-        "SR"
-    }
-    pub const fn tcp_get() -> &'static str {
-        "TCPGET"
+        "SER"
     }
 
     // TODO: Check each packet header for UDP, only the first packet for TCP.
@@ -61,6 +69,7 @@ impl PacketHeader {
         const STOP_AND_WAIT_NAK: &'static str = PacketHeader::stop_and_wait_nak();
         const GO_BACK_N: &'static str = PacketHeader::go_back_n();
         const SELECTIVE_REPEAT: &'static str = PacketHeader::selective_repeat();
+        const RDT: &'static str = PacketHeader::rdt_get();
         let header_str = packet_str.lines().next().unwrap_or("");
         let header = [header_str, "\n"].join("");
         if header.starts_with(DISCOVERY) {
@@ -70,7 +79,7 @@ impl PacketHeader {
         } else if header.starts_with(ACK) {
             PacketHeader::GETACK
         } else if header.starts_with(TCP_GET) {
-            PacketHeader::TCPReceiverExistence
+            PacketHeader::TCPGET
         } else if header.starts_with(STOP_AND_WAIT_DATA) {
             PacketHeader::StopWaitData
         } else if header.starts_with(STOP_AND_WAIT_ACK) {
@@ -81,6 +90,8 @@ impl PacketHeader {
             PacketHeader::GoBackN
         } else if header.starts_with(SELECTIVE_REPEAT) {
             PacketHeader::SRepeat
+        } else if header.starts_with(RDT) {
+            PacketHeader::RDTGET
         } else {
             PacketHeader::Unrecognized
         }
@@ -96,7 +107,7 @@ impl fmt::Display for PacketHeader {
             display_str = PacketHeader::discovery();
         } else if self == &PacketHeader::GETACK {
             display_str = PacketHeader::ack();
-        } else if self == &PacketHeader::TCPReceiverExistence {
+        } else if self == &PacketHeader::TCPGET {
             display_str = PacketHeader::tcp_get();
         } else if self == &PacketHeader::StopWaitData {
             display_str = PacketHeader::stop_and_wait_data();
@@ -108,6 +119,8 @@ impl fmt::Display for PacketHeader {
             display_str = PacketHeader::go_back_n();
         } else if self == &PacketHeader::SRepeat {
             display_str = PacketHeader::selective_repeat();
+        } else if self == &PacketHeader::RDTGET {
+            display_str = PacketHeader::rdt_get();
         } else {
             display_str = PacketHeader::discovery();
         }
@@ -162,24 +175,30 @@ impl StdinHeader {
 }
 
 pub struct StopAndWaitHeader {
-    header_size: u16,
-    get_port: u16,
-    rdt_port: u16,
-    file_name: String,
+    pub header_type: PacketHeader,
+    pub header_size: u16,
+    pub get_port: u16,
+    pub rdt_port: u16,
+    pub file_name: String,
+    pub ip: IpAddr,
 }
 
 impl StopAndWaitHeader {
     pub fn new(
+        header_type: PacketHeader,
         header_size: u16,
         get_port: u16,
         rdt_port: u16,
         file_name: String,
+        ip: IpAddr,
     ) -> StopAndWaitHeader {
         StopAndWaitHeader {
+            header_type,
             header_size,
             get_port,
             rdt_port,
             file_name,
+            ip,
         }
     }
 
@@ -188,7 +207,9 @@ impl StopAndWaitHeader {
         byte_str.parse::<u16>().unwrap()
     }
 
-    pub fn from_string(buf: &[u8]) -> StopAndWaitHeader {
+    pub fn from_bytes(buf: &[u8], ip: IpAddr) -> (StopAndWaitHeader, &[u8]) {
+        let header =
+            PacketHeader::packet_type(std::str::from_utf8(&buf[..RDT_HEADER_SIZE]).unwrap_or(""));
         let size = size_of::<u16>();
         let header_size = StopAndWaitHeader::u16_from_bytes(&buf[..size]);
         let header_usize: usize = header_size.into();
@@ -197,10 +218,13 @@ impl StopAndWaitHeader {
         let file_name = std::str::from_utf8(&buf[size * 3..header_usize])
             .unwrap()
             .to_string();
-        StopAndWaitHeader::new(header_size, get_port, rdt_port, file_name)
+        (
+            StopAndWaitHeader::new(header, header_size, get_port, rdt_port, file_name, ip),
+            &buf[header_usize..],
+        )
     }
 
     pub fn packet_size(file_name: String) -> usize {
-        size_of::<u16>() * 3 + file_name.as_bytes().len()
+        RDT_HEADER_SIZE + size_of::<u16>() * 3 + file_name.as_bytes().len()
     }
 }
