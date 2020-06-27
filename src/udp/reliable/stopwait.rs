@@ -25,8 +25,8 @@ pub fn sw_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result
         // This function is the only one reading from the socket!
         let (_, addr) = socket.recv_from(&mut buf).unwrap();
         let buf_clone = buf.clone();
-        let (header, data) = StopAndWaitHeader::from_bytes(&buf_clone, addr.ip());
-        let header_ip = match header.ip {
+        let (header, data) = StopAndWaitHeader::from_bytes(&buf_clone);
+        let header_ip = match addr.ip() {
             IpAddr::V4(v4) => v4,
             // Cause who tf is using Ipv6 with this?
             IpAddr::V6(_) => return Ok(()),
@@ -46,7 +46,7 @@ pub fn sw_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result
                     "Spawning a new sender thread for socket: {}",
                     client_rdt_address
                 );
-                std::thread::spawn(move || sw_sender(new_socket, receiver, prior_comms));
+                std::thread::spawn(move || sw_sender(new_socket, receiver, prior_comms, client_rdt_address));
                 sender.send((header, data.to_vec())).unwrap();
             }
         } else if header.header_type == PacketHeader::StopWaitACK
@@ -86,6 +86,7 @@ pub fn sw_sender(
     socket: UdpSocket,
     receiver: Receiver<(StopAndWaitHeader, Vec<u8>)>,
     prior_comms: u16,
+    rdt_addr: String
 ) -> std::io::Result<()> {
     // Here, data is not important because we're the sender.
     let (header, _) = receiver.recv().unwrap();
@@ -94,13 +95,7 @@ pub fn sw_sender(
     let file_addr = generate_file_address(&file_name, false);
     let f = File::open(&file_addr)?;
     let mut file_input_stream = BufReader::new(f);
-    let header_ip = match header.ip {
-        IpAddr::V4(v4) => v4,
-        // Cause who tf is using Ipv6 with this?
-        IpAddr::V6(_) => return Ok(()),
-    };
-    let get_addr = ip_port_string(header_ip, header.get_port);
-    let rdt_addr = ip_port_string(header_ip, header.rdt_port);
+    let get_port = header.get_port;
     let mut buf = [0; BUF_SIZE];
     let mut corrupt_packet_count = 0;
     let mut size: usize =
@@ -114,14 +109,7 @@ pub fn sw_sender(
             let anti_surfing_interval = time::Duration::from_millis(delay);
             thread::sleep(anti_surfing_interval);
             info!("Finished sleeping");
-            let header_ip = match header.ip {
-                IpAddr::V4(v4) => v4,
-                // Cause who tf is using Ipv6 with this?
-                IpAddr::V6(_) => return Ok(()),
-            };
-            let new_get_addr = ip_port_string(header_ip, header.get_port);
-            let new_rdt_addr = ip_port_string(header_ip, header.rdt_port);
-            if new_get_addr == get_addr && new_rdt_addr == rdt_addr && header.file_name == file_name
+            if header.get_port == get_port && header.file_name == file_name
             {
                 if header.header_type == PacketHeader::StopWaitACK {
                     info!("Received ACK");
@@ -153,16 +141,14 @@ pub fn sw_sender(
 
 pub fn three_headers(
     get_port: u16,
-    rdt_port: u16,
     file_name: &str,
-    ip: IpAddr,
 ) -> (StopAndWaitHeader, StopAndWaitHeader, StopAndWaitHeader) {
     let get_header =
-        StopAndWaitHeader::new(PacketHeader::RDTGET, get_port, rdt_port, file_name, ip);
+        StopAndWaitHeader::new(PacketHeader::RDTGET, get_port, file_name);
     let ack_header =
-        StopAndWaitHeader::new(PacketHeader::StopWaitACK, get_port, rdt_port, file_name, ip);
+        StopAndWaitHeader::new(PacketHeader::StopWaitACK, get_port, file_name);
     let nak_header =
-        StopAndWaitHeader::new(PacketHeader::StopWaitNAK, get_port, rdt_port, file_name, ip);
+        StopAndWaitHeader::new(PacketHeader::StopWaitNAK, get_port, file_name);
     (get_header, ack_header, nak_header)
 }
 
@@ -180,7 +166,7 @@ pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<
     socket.set_write_timeout(Some(timeout)).unwrap();
     socket.set_read_timeout(Some(timeout)).unwrap();
     let (get_header, ack_header, nak_header) =
-        three_headers(UDP_GET_PORT, *DATA_RECEIVER_PORT, &file_name, localhost);
+        three_headers(UDP_GET_PORT, &file_name);
     // Send data GET packet
     let failure_addr = SocketAddr::new(localhost, 0);
     info!("The udp get packet is: {}", get_header.as_string());

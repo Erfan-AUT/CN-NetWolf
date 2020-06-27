@@ -197,30 +197,24 @@ pub struct StopAndWaitHeader {
     pub header_type: PacketHeader,
     pub header_size: u16,
     pub get_port: u16,
-    pub rdt_port: u16,
     pub file_name: String,
-    pub ip: IpAddr,
 }
 
 impl StopAndWaitHeader {
     pub fn new(
         header_type: PacketHeader,
         get_port: u16,
-        rdt_port: u16,
         file_name: &str,
-        ip: IpAddr,
     ) -> StopAndWaitHeader {
         StopAndWaitHeader {
             header_type,
             header_size: StopAndWaitHeader::find_header_size(&file_name),
             get_port,
-            rdt_port,
             file_name: String::from(file_name),
-            ip,
         }
     }
 
-    pub fn from_bytes(buf: &[u8], ip: IpAddr) -> (StopAndWaitHeader, &[u8]) {
+    pub fn from_bytes(buf: &[u8]) -> (StopAndWaitHeader, &[u8]) {
         let base = RDT_HEADER_SIZE as usize;
         let header = PacketHeader::packet_type(std::str::from_utf8(&buf[..base]).unwrap_or(""));
         let size = size_of::<u16>();
@@ -228,13 +222,11 @@ impl StopAndWaitHeader {
         let header_size = u16::from_ne_bytes(header_size_bytes) as usize;
         let get_port_bytes: [u8; 2] = buf[base + size..base + size * 2].try_into().unwrap();
         let get_port = u16::from_ne_bytes(get_port_bytes);
-        let rdt_port_bytes: [u8; 2] = buf[base + size * 2..base + size * 3].try_into().unwrap();
-        let rdt_port = u16::from_ne_bytes(rdt_port_bytes);
-        let file_name = std::str::from_utf8(&buf[base + size * 3..header_size])
+        let file_name = std::str::from_utf8(&buf[base + size * 2..header_size])
             .unwrap()
             .to_string();
         (
-            StopAndWaitHeader::new(header, get_port, rdt_port, &file_name, ip),
+            StopAndWaitHeader::new(header, get_port, &file_name),
             &buf[header_size..],
         )
     }
@@ -244,13 +236,12 @@ impl StopAndWaitHeader {
         header_str.push_str(&self.header_type.to_string());
         header_str.push_str(&self.header_size.to_string());
         header_str.push_str(&self.get_port.to_string());
-        header_str.push_str(&self.rdt_port.to_string());
         header_str.push_str(&self.file_name);
         header_str
     }
 
     pub fn find_header_size(file_name: &str) -> u16 {
-        RDT_HEADER_SIZE + (size_of::<u16>() as u16) * 3 + file_name.as_bytes().len() as u16
+        RDT_HEADER_SIZE + (size_of::<u16>() as u16) * 2 + file_name.as_bytes().len() as u16
     }
 
     pub fn as_vec(&self) -> Vec<u8> {
@@ -258,15 +249,7 @@ impl StopAndWaitHeader {
         let type_bytes = type_str.as_bytes();
         let size_bytes = self.header_size.to_ne_bytes();
         let get_port_bytes = self.get_port.to_ne_bytes();
-        let rdt_port_bytes = self.rdt_port.to_ne_bytes();
         let file_name_bytes = self.file_name.as_bytes();
-        [
-            type_bytes,
-            &size_bytes,
-            &get_port_bytes,
-            &rdt_port_bytes,
-            file_name_bytes,
-        ]
-        .concat()
+        [type_bytes, &size_bytes, &get_port_bytes, file_name_bytes].concat()
     }
 }
