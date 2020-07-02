@@ -5,6 +5,7 @@ use std::io::{Error, ErrorKind};
 use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use std::process::Command;
 
 pub const CONGESTION_DELAY_MS: u64 = 500;
 pub const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
@@ -25,6 +26,30 @@ fn random_data_port() -> u16 {
     let mut r = rand::thread_rng();
     r.gen_range(PORT_MIN, PORT_MAX)
 }
+
+#[cfg(target_os = "windows")]
+fn windows_local_ip() -> Ipv4Addr {
+    let output = Command::new("ipconfig").output().unwrap();
+    let output_str = String::from_utf8(output.stdout).unwrap();
+    let lines = output_str.lines();
+    let mut local_ipv4_string = "";
+    for line in lines {
+        if line.contains("IPv4 Address") {
+            local_ipv4_string = line;
+        }
+    }
+    let a = local_ipv4_string.rfind(":").unwrap();
+    local_ipv4_string[a+2..].parse().unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_local_ip() -> Ipv4Addr {
+    let output = Command::new("ipconfig").arg("-I").output().unwrap();
+    let output_str = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = output_str.split_ascii_whitespace().collect();
+    lines[lines.len() - 1].to_string().parse().unwrap()
+}
+
 // Wanted to put this entire sneaky node shenanigan in an inline function,
 // But apparently rust's inline functions are just not really good:
 // https://github.com/rust-lang/rust/issues/14527

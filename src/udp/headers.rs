@@ -1,7 +1,6 @@
 use std::convert::TryInto;
 use std::fmt;
 use std::mem::size_of;
-use std::net::IpAddr;
 
 pub const RDT_HEADER_SIZE: u16 = 3;
 

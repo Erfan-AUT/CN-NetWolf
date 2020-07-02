@@ -1,20 +1,19 @@
 use crate::dir::{file_list, generate_file_address};
+use crate::networking::bind_udp_socket;
 use crate::networking::{
-    self, check_clients, delay_to_avoid_surfers, ip_port_string, update_client_number,
-    update_nodes, BUF_SIZE, DATA_RECEIVER_PORT, LOCALHOST, UDP_GET_PORT,
+    self, check_clients, delay_to_avoid_surfers, ip_port_string, BUF_SIZE, DATA_RECEIVER_PORT,
+    LOCALHOST, UDP_GET_PORT,
 };
-use crate::networking::{bind_udp_socket, node_of_packet};
 use crate::node;
 use crate::udp::headers::{PacketHeader, StopAndWaitHeader, RDT_HEADER_SIZE};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Error, ErrorKind, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use std::vec;
 use std::{thread, time};
 
 pub fn sw_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
@@ -46,7 +45,9 @@ pub fn sw_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result
                     "Spawning a new sender thread for socket: {}",
                     client_rdt_address
                 );
-                std::thread::spawn(move || sw_sender(new_socket, receiver, prior_comms, client_rdt_address));
+                std::thread::spawn(move || {
+                    sw_sender(new_socket, receiver, prior_comms, client_rdt_address)
+                });
                 sender.send((header, data.to_vec())).unwrap();
             }
         } else if header.header_type == PacketHeader::StopWaitACK
@@ -86,7 +87,7 @@ pub fn sw_sender(
     socket: UdpSocket,
     receiver: Receiver<(StopAndWaitHeader, Vec<u8>)>,
     prior_comms: u16,
-    rdt_addr: String
+    rdt_addr: String,
 ) -> std::io::Result<()> {
     // Here, data is not important because we're the sender.
     let (header, _) = receiver.recv().unwrap();
@@ -109,8 +110,7 @@ pub fn sw_sender(
             let anti_surfing_interval = time::Duration::from_millis(delay);
             thread::sleep(anti_surfing_interval);
             info!("Finished sleeping");
-            if header.get_port == get_port && header.file_name == file_name
-            {
+            if header.get_port == get_port && header.file_name == file_name {
                 if header.header_type == PacketHeader::StopWaitACK {
                     info!("Received ACK");
                     size = read_and_write(&mut file_input_stream, &mut buf, &socket, &rdt_addr)
@@ -143,12 +143,9 @@ pub fn three_headers(
     get_port: u16,
     file_name: &str,
 ) -> (StopAndWaitHeader, StopAndWaitHeader, StopAndWaitHeader) {
-    let get_header =
-        StopAndWaitHeader::new(PacketHeader::RDTGET, get_port, file_name);
-    let ack_header =
-        StopAndWaitHeader::new(PacketHeader::StopWaitACK, get_port, file_name);
-    let nak_header =
-        StopAndWaitHeader::new(PacketHeader::StopWaitNAK, get_port, file_name);
+    let get_header = StopAndWaitHeader::new(PacketHeader::RDTGET, get_port, file_name);
+    let ack_header = StopAndWaitHeader::new(PacketHeader::StopWaitACK, get_port, file_name);
+    let nak_header = StopAndWaitHeader::new(PacketHeader::StopWaitNAK, get_port, file_name);
     (get_header, ack_header, nak_header)
 }
 
@@ -165,8 +162,7 @@ pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<
     let timeout: Duration = Duration::new(3, 0);
     socket.set_write_timeout(Some(timeout)).unwrap();
     socket.set_read_timeout(Some(timeout)).unwrap();
-    let (get_header, ack_header, nak_header) =
-        three_headers(UDP_GET_PORT, &file_name);
+    let (get_header, ack_header, nak_header) = three_headers(UDP_GET_PORT, &file_name);
     // Send data GET packet
     let failure_addr = SocketAddr::new(localhost, 0);
     info!("The udp get packet is: {}", get_header.as_string());
