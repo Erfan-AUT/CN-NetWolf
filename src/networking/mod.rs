@@ -1,4 +1,5 @@
 use crate::node;
+use crate::NODE_IP;
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
@@ -8,7 +9,6 @@ use std::time::Duration;
 use std::process::Command;
 
 pub const CONGESTION_DELAY_MS: u64 = 500;
-pub const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
 pub const UDP_GET_PORT: u16 = 3222;
 pub const DISCOVERY_INTERVAL_MS: u64 = 1000;
 pub const BUF_SIZE: usize = 8192;
@@ -28,7 +28,7 @@ fn random_data_port() -> u16 {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_local_ip() -> Ipv4Addr {
+pub fn local_ip() -> Ipv4Addr {
     let output = Command::new("ipconfig").output().unwrap();
     let output_str = String::from_utf8(output.stdout).unwrap();
     let lines = output_str.lines();
@@ -43,7 +43,7 @@ fn windows_local_ip() -> Ipv4Addr {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_local_ip() -> Ipv4Addr {
+pub fn local_ip() -> Ipv4Addr {
     let output = Command::new("ipconfig").arg("-I").output().unwrap();
     let output_str = String::from_utf8(output.stdout).unwrap();
     let lines: Vec<&str> = output_str.split_ascii_whitespace().collect();
@@ -130,7 +130,7 @@ pub fn update_client_number(increment: bool) {
 
 pub fn bind_udp_socket(mut port: u16, with_timeout: bool) -> UdpSocket {
     loop {
-        let udp_server_addr = ip_port_string(LOCALHOST, port);
+        let udp_server_addr = ip_port_string(*NODE_IP.read().unwrap(), port);
         match UdpSocket::bind(udp_server_addr) {
             Ok(sckt) => {
                 let timeout: Duration = Duration::new(1, 0);

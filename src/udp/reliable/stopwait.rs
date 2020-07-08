@@ -2,10 +2,11 @@ use crate::dir::{file_list, generate_file_address};
 use crate::networking::bind_udp_socket;
 use crate::networking::{
     self, check_clients, delay_to_avoid_surfers, ip_port_string, BUF_SIZE, DATA_RECEIVER_PORT,
-    LOCALHOST, UDP_GET_PORT,
+    UDP_GET_PORT,
 };
 use crate::node;
 use crate::udp::headers::{PacketHeader, StopAndWaitHeader, RDT_HEADER_SIZE};
+use crate::NODE_IP;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -152,7 +153,7 @@ pub fn three_headers(
 pub fn sw_client(sender_addr: SocketAddr, file_name: String) -> std::io::Result<()> {
     info!("Trying to connect to S&W Data Socket: {}", sender_addr);
     let file_addr = generate_file_address(&file_name, true);
-    let localhost = IpAddr::V4(LOCALHOST);
+    let localhost = IpAddr::V4(*NODE_IP.read().unwrap());
     let recv_addr = SocketAddr::new(localhost, *DATA_RECEIVER_PORT);
     let socket = UdpSocket::bind(recv_addr).unwrap();
     let f = File::create(file_addr).unwrap();

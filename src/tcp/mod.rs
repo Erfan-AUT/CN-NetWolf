@@ -1,8 +1,9 @@
 use crate::dir::{file_list, generate_file_address};
 use crate::networking::{
-    check_clients, delay_to_avoid_surfers, ip_port_string, update_client_number, UDP_GET_PORT, LOCALHOST
+    check_clients, delay_to_avoid_surfers, ip_port_string, update_client_number, UDP_GET_PORT
 };
 use crate::node;
+use crate::NODE_IP;
 use crate::udp::headers::{PacketHeader, TCPHeader};
 use log::{info, warn};
 use std::collections::HashSet;
@@ -92,7 +93,7 @@ fn check_and_handle_clients(mut stream: TcpStream, nodes_arc: Arc<RwLock<HashSet
 // First packet of every stream: Who you are and what you want (again)
 // Because all sending is done through this one TCP Listener.
 pub fn tcp_server(nodes_arc: Arc<RwLock<HashSet<node::Node>>>) -> std::io::Result<()> {
-    let tcp_addr = ip_port_string(LOCALHOST, *networking::DATA_SENDER_PORT);
+    let tcp_addr = ip_port_string(*NODE_IP.read().unwrap(), *networking::DATA_SENDER_PORT);
     let listener = match TcpListener::bind(&tcp_addr) {
         Ok(lsner) => lsner,
         Err(_) => return Ok(()),

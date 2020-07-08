@@ -20,6 +20,8 @@ lazy_static! {
     static ref STATIC_DIR: RwLock<String> = RwLock::new(String::new());
     static ref DATA_CONN_TYPE: RwLock<udp::headers::ConnectionType> =
         RwLock::new(udp::headers::ConnectionType::default());
+    static ref NODE_IP: RwLock<std::net::Ipv4Addr> =
+        RwLock::new(std::net::Ipv4Addr::new(127, 0, 0, 1));
 }
 
 fn main() -> std::io::Result<()> {
@@ -56,20 +58,31 @@ fn main() -> std::io::Result<()> {
                 .takes_value(false)
                 .about("Enables the program to be run in verbose mode."),
         )
+        .arg(
+            Arg::with_name("Local IP")
+                .short('i')
+                .long("local")
+                .takes_value(false)
+                .about("Use the local ip address instead of 127.0.0.1"),
+        )
         .get_matches();
     let init_nodes_dir = matches.value_of("list").unwrap_or("nodes.txt");
     let static_dir = matches.value_of("dir").unwrap_or("./static/").to_string();
     let is_verbose = matches.is_present("verbose");
+    let is_local = matches.is_present("Local IP");
     let connection_type = matches.value_of("conntype").unwrap_or_default();
     *DATA_CONN_TYPE.write().unwrap() = match connection_type {
         "tcp" => udp::headers::ConnectionType::TCP,
         "sw" => udp::headers::ConnectionType::SAndW,
         "gbn" => udp::headers::ConnectionType::GoBackN,
         "sr" => udp::headers::ConnectionType::SRepeat,
-        &_ => udp::headers::ConnectionType::TCP
+        &_ => udp::headers::ConnectionType::TCP,
     };
     if is_verbose {
         simple_logger::init_with_level(log::Level::Info).unwrap();
+    }
+    if is_local {
+        *NODE_IP.write().unwrap() = networking::local_ip();
     }
     *STATIC_DIR.write().unwrap() = static_dir;
     let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
