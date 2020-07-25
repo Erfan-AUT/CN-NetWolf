@@ -1,7 +1,7 @@
 # CN1-P2P-Project
 
 ## How to run:
-Just type ""cargo run"". :)))
+Just type <mark>cargo run</mark>. :)))
 
 ## Roadmap: 
 * Reliable UDP Go-Back-N and Selective Repeat.
