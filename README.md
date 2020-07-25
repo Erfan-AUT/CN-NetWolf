@@ -1,4 +1,4 @@
-# CN1-P2P-Project
+# CN1-NetWolf
 
 ## How to run:
 Just type `cargo run`. :)))
