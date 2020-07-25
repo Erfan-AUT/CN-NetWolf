@@ -168,7 +168,7 @@ pub fn get_client(
 
         if arg.starts_with(headers::StdinHeader::list()) {
             let value = &*nodes_arc.read().unwrap();
-            println!("{:?}", value);
+            info!("{:?}", value);
         } else if arg.starts_with(headers::StdinHeader::get()) {
             info!("Understand GET");
             // Make sure there is a file name!
@@ -176,8 +176,6 @@ pub fn get_client(
                 Some(cmd) => cmd.trim(),
                 None => continue,
             };
-            info!("Waiting for socket acq.");
-            info!("Waiting for nodes acq.");
             let nodes_ptr = nodes_arc.read().unwrap();
             let nodes = &*nodes_ptr;
             info!("Preparing to broadcast GET");
@@ -186,6 +184,8 @@ pub fn get_client(
                 let mut request = String::from(headers::PacketHeader::get());
                 request.push_str(file_name);
                 info!("The request is: {}", request);
+                let target_addr = ip_port_string(node.ip, node.port);
+                info!("{}", target_addr);
                 send_bytes_to_udp_socket(request.as_bytes(), node, &socket).unwrap_or(0);
             }
         }
@@ -198,7 +198,10 @@ pub fn main_server(init_nodes_dir: String, stdin_rx: Receiver<String>) {
     let nodes_rwlock = RwLock::new(nodes);
     let socket = bind_udp_socket(UDP_GET_PORT, true);
     let nodes_arc = Arc::new(nodes_rwlock);
-    info!("Generated UDP socket successfully!");
+    info!(
+        "Opened UDP socket on {:?}",
+        socket.local_addr().unwrap().to_string()
+    );
     let (discovery_tx, discovery_rx) = mpsc::channel::<String>();
     let (get_server_tx, get_server_rx) = mpsc::channel::<(String, SocketAddr)>();
     //Spawn the clones first kids! Don't do it while calling the function. :)))))))
