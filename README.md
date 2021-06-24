@@ -1,6 +1,6 @@
 # CN-NetWolf
 
-[Final Project of Computer Netweorks, under Dr. Masoud Sabaei]
+[Final Project of Computer Networks, under Dr. Masoud Sabaei]
 
 ## How to run:
 Just type `cargo run`. :)))
