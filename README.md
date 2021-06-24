@@ -1,9 +1,11 @@
-# CN1-NetWolf
+# CN-NetWolf
+
+[Final Project of Computer Netweorks, under Dr. Masoud Sabaei]
 
 ## How to run:
 Just type `cargo run`. :)))
 
-## Roadmap: 
+## Roadmap: [That aged well]
 * Reliable UDP Go-Back-N and Selective Repeat.
 * Find better ways to avoid congestion and leechers.
 * Nodes as routers. (needs heavy testing)
